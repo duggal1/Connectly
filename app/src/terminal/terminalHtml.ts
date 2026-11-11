@@ -98,6 +98,7 @@ export const TERMINAL_HTML = `<!doctype html>
   window.__paste = function(s){ term.paste(s); };
   window.__sel = function(){ post({t:'sel', s:term.getSelection()}); };
   window.__focus = function(){ term.focus(); };
+  window.__blur = function(){ term.blur(); if (document.activeElement) document.activeElement.blur(); };
 
   try { fit.fit(); } catch(e){}
   post({t:'ready', cols:term.cols, rows:term.rows});

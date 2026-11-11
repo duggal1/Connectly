@@ -11,7 +11,7 @@ import type { HostConfig } from '../lib/storage';
 import { LinkState, TermConnection } from '../lib/connection';
 import { utf8Encode } from '../lib/protocol';
 import { useDelayed, useKeyboardHeight } from '../ui/hooks';
-import { IconButton, Button } from '../ui/Button';
+import { Button } from '../ui/Button';
 import { MacStats } from '../ui/MacStats';
 import { Notice } from '../ui/Notice';
 import { PixelMark } from '../ui/Pixel';
@@ -53,12 +53,16 @@ function ctrlByte(b: number): number {
 export function TerminalScreen({
   cfg,
   session,
-  onBack,
+  active,
+  onBound,
+  onTitle,
   onRestart,
 }: {
   cfg: HostConfig;
   session?: string;
-  onBack: () => void;
+  active: boolean;
+  onBound: (id: string) => void;
+  onTitle: (title: string) => void;
   onRestart: () => void;
 }) {
   const t = useTok();
@@ -87,6 +91,11 @@ export function TerminalScreen({
   const slow = useDelayed(link === 'reconnecting', 1500);
 
   const js = useCallback((code: string) => web.current?.injectJavaScript(code + ';true;'), []);
+
+  useEffect(() => {
+    if (renderer !== 'ok') return;
+    js(active ? 'window.__focus()' : 'window.__blur()');
+  }, [active, renderer, js]);
 
   const flush = useCallback(() => {
     flushT.current = null;
@@ -119,6 +128,7 @@ export function TerminalScreen({
           js('window.__reset()');
         }
         setSid(info.session);
+        onBound(info.session);
         setExitCode(null);
       },
       data: (bytes) => {
@@ -201,7 +211,10 @@ export function TerminalScreen({
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
         break;
       case 'title':
-        if (typeof parsed.s === 'string') setTitle(parsed.s);
+        if (typeof parsed.s === 'string') {
+          setTitle(parsed.s);
+          onTitle(parsed.s);
+        }
         break;
       case 'sel':
         if (typeof parsed.s === 'string' && parsed.s) Clipboard.setStringAsync(parsed.s);
@@ -249,10 +262,9 @@ export function TerminalScreen({
     ) : null;
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
-      <View style={{ height: H.bar, flexDirection: 'row', alignItems: 'center', paddingLeft: 4, paddingRight: 16 }}>
-        <IconButton icon="arrowLeft" label="Back to sessions" onPress={onBack} />
-        <View style={{ flex: 1, marginLeft: 4 }}>
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <View style={{ height: H.bar, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 }}>
+        <View style={{ flex: 1 }}>
           <Txt kind="label" numberOfLines={1}>{heading}</Txt>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 16 }}>
             <View style={{ width: 14, alignItems: 'flex-start' }}>{lead}</View>
@@ -263,7 +275,7 @@ export function TerminalScreen({
         <LinkStrip samples={samples} />
       </View>
 
-      <MacStats data={mac?.s ?? null} rx={mac?.rx ?? 0} live={link === 'live'} />
+      {kb === 0 ? <MacStats data={mac?.s ?? null} rx={mac?.rx ?? 0} live={link === 'live'} /> : null}
 
       <View style={{ flex: 1, paddingBottom: kb }}>
         <View style={{ flex: 1 }}>

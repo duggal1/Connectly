@@ -38,9 +38,9 @@ const hostPart = (h: string) => (h.includes(':') && !h.startsWith('[') ? `[${h}]
 export const httpBase = (c: HostConfig) => `${c.tls ? 'https' : 'http'}://${hostPart(c.host)}:${c.port}`;
 export const wsUrl = (c: HostConfig) => `${c.tls ? 'wss' : 'ws'}://${hostPart(c.host)}:${c.port}/ws`;
 
-function request<T>(cfg: HostConfig, path: string, init: RequestInit | undefined, optional404: false): Promise<T>;
-function request<T>(cfg: HostConfig, path: string, init: RequestInit | undefined, optional404: true): Promise<T | null>;
-async function request<T>(cfg: HostConfig, path: string, init: RequestInit | undefined, optional404: boolean): Promise<T | null> {
+function request<T>(cfg: HostConfig, path: string, init: RequestInit | undefined, optional404: false, timeoutMs: number): Promise<T>;
+function request<T>(cfg: HostConfig, path: string, init: RequestInit | undefined, optional404: true, timeoutMs: number): Promise<T | null>;
+async function request<T>(cfg: HostConfig, path: string, init: RequestInit | undefined, optional404: boolean, timeoutMs: number): Promise<T | null> {
   const requestId = `req-${Date.now()}-${++requestSequence}`;
   const url = httpBase(cfg) + path;
   const method = init?.method ?? 'GET';
@@ -50,8 +50,8 @@ async function request<T>(cfg: HostConfig, path: string, init: RequestInit | und
   const timer = setTimeout(() => {
     timedOut = true;
     ctl.abort();
-  }, REQUEST_TIMEOUT_MS);
-  console.info('[api] request started', { requestId, method, url, timeoutMs: REQUEST_TIMEOUT_MS });
+  }, timeoutMs);
+  console.info('[api] request started', { requestId, method, url, timeoutMs });
   try {
     const r = await fetch(url, {
       ...init,
@@ -77,8 +77,9 @@ async function request<T>(cfg: HostConfig, path: string, init: RequestInit | und
       console.info('[api] optional endpoint unavailable', { requestId, path, status: r.status });
       return null;
     }
+    let responseBody = '';
     if (!r.ok) {
-      const responseBody = (await r.text()).slice(0, 1000);
+      responseBody = (await r.text()).slice(0, 1000);
       console.error('[api] non-success response body', {
         requestId,
         url,
@@ -88,7 +89,9 @@ async function request<T>(cfg: HostConfig, path: string, init: RequestInit | und
     }
     if (r.status === 401) throw new ApiError(`Wrong token (HTTP 401, request ${requestId}).`, 401, requestId);
     if (r.status === 429) throw new ApiError(`Too many attempts; locked for 5 minutes (HTTP 429, request ${requestId}).`, 429, requestId);
-    if (!r.ok) throw new ApiError(`Daemon returned HTTP ${r.status} ${r.statusText} (request ${requestId}).`, r.status, requestId);
+    if (!r.ok) {
+      throw new ApiError(responseBody.trim() || `Daemon returned HTTP ${r.status} ${r.statusText} (request ${requestId}).`, r.status, requestId);
+    }
     if (r.status === 204) return undefined as T;
     return (await r.json()) as T;
   } catch (error: unknown) {
@@ -105,7 +108,7 @@ async function request<T>(cfg: HostConfig, path: string, init: RequestInit | und
     const detail = describeError(error);
     const durationMs = Date.now() - startedAt;
     const message = timedOut
-      ? `Timed out after ${REQUEST_TIMEOUT_MS} ms contacting ${url}. Confirm Tailscale is connected on both devices and that this phone can see the Mac in the same tailnet. The token is checked only after the Mac responds. Request ${requestId}.`
+      ? `Timed out after ${timeoutMs} ms contacting ${url}. Confirm Tailscale is connected on both devices and that this phone can see the Mac in the same tailnet. The token is checked only after the Mac responds. Request ${requestId}.`
       : `Network error contacting ${url}: ${detail.name}: ${detail.message}. Request ${requestId}.`;
     console.error('[api] request failed', {
       requestId,
@@ -122,10 +125,43 @@ async function request<T>(cfg: HostConfig, path: string, init: RequestInit | und
   }
 }
 
-export function api<T>(cfg: HostConfig, path: string, init?: RequestInit): Promise<T> {
-  return request<T>(cfg, path, init, false);
+export function api<T>(cfg: HostConfig, path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  return request<T>(cfg, path, init, false, timeoutMs);
 }
 
-export function apiOptional<T>(cfg: HostConfig, path: string, init?: RequestInit): Promise<T | null> {
-  return request<T>(cfg, path, init, true);
+export function apiOptional<T>(cfg: HostConfig, path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T | null> {
+  return request<T>(cfg, path, init, true, timeoutMs);
 }
+
+export interface ActionInfo {
+  id: string;
+  label: string;
+  kind: 'app' | 'path' | 'shortcut' | 'script';
+  timeoutSec: number;
+}
+
+export interface Capabilities {
+  clipboard: boolean;
+  volume: boolean;
+  open: boolean;
+  visual: boolean;
+  actions: ActionInfo[];
+}
+
+export interface ActionResult {
+  ok: boolean;
+  code: number;
+  output: string;
+  ms: number;
+}
+
+export interface VisualGrant {
+  ticket: string;
+  ttlSec: number;
+}
+
+export const json = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+});

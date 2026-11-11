@@ -15,7 +15,10 @@ sudo install -m 755 termd /usr/local/bin/termd
 
 SUDOERS_TMP="$(mktemp)"
 trap 'rm -f "$SUDOERS_TMP"' EXIT
-echo "$ME ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1" > "$SUDOERS_TMP"
+SS_PLIST="/System/Library/LaunchDaemons/com.apple.screensharing.plist"
+cat > "$SUDOERS_TMP" <<SUDO
+$ME ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1, /bin/launchctl load -w $SS_PLIST, /bin/launchctl unload -w $SS_PLIST
+SUDO
 sudo visudo -cf "$SUDOERS_TMP"
 sudo install -m 440 -o root -g wheel "$SUDOERS_TMP" /etc/sudoers.d/connectly-pmset
 

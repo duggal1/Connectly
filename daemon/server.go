@@ -69,13 +69,15 @@ type Server struct {
 	token []byte
 	mgr   *Manager
 	stats *StatsSource
+	act   *Actions
+	vis   *Visual
 	lim   *limiter
 	up    websocket.Upgrader
 }
 
-func newServer(cfg Config, token string, mgr *Manager, stats *StatsSource) *Server {
+func newServer(cfg Config, token string, mgr *Manager, stats *StatsSource, actions *Actions, visual *Visual) *Server {
 	return &Server{
-		cfg: cfg, token: []byte(token), mgr: mgr, stats: stats, lim: newLimiter(),
+		cfg: cfg, token: []byte(token), mgr: mgr, stats: stats, act: actions, vis: visual, lim: newLimiter(),
 		// Native clients send no Origin. Token auth is the gate, not origin.
 		up: websocket.Upgrader{ReadBufferSize: 64 << 10, WriteBufferSize: 64 << 10, CheckOrigin: func(*http.Request) bool { return true }},
 	}
@@ -91,6 +93,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/sessions", s.auth(s.listSessions))
 	mux.HandleFunc("GET /api/stats", s.auth(s.getStats))
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.auth(s.deleteSession))
+	s.mountActions(mux, s.auth, true)
+	s.mountVisual(mux)
 	return mux
 }
 

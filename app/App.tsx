@@ -1,72 +1,65 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { BackHandler, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { BackHandler, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { HostConfig, loadHost } from './src/lib/storage';
+import type { HostConfig } from './src/lib/storage';
+import { loadHost } from './src/lib/storage';
 import { useTok } from './src/theme/tokens';
 import { Fade } from './src/ui/Fade';
 import { ConnectScreen } from './src/screens/ConnectScreen';
-import { SessionsScreen } from './src/screens/SessionsScreen';
-import { TerminalScreen } from './src/terminal/TerminalScreen';
-
-type Route =
-  | { name: 'boot' }
-  | { name: 'connect'; first: boolean }
-  | { name: 'sessions' }
-  | { name: 'terminal'; session?: string; key: number };
+import { Workspace } from './src/screens/Workspace';
 
 function Root() {
   const t = useTok();
   const [cfg, setCfg] = useState<HostConfig | null>(null);
-  const [route, setRoute] = useState<Route>({ name: 'boot' });
-  const keyRef = useRef(0);
+  const [booted, setBooted] = useState(false);
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
-    loadHost().then((h) => {
-      setCfg(h);
-      setRoute(h ? { name: 'sessions' } : { name: 'connect', first: true });
+    void loadHost().then((host) => {
+      setCfg(host);
+      setConnecting(!host);
+      setBooted(true);
+    }).catch(() => {
+      setConnecting(true);
+      setBooted(true);
     });
   }, []);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (route.name === 'terminal') { setRoute({ name: 'sessions' }); return true; }
-      if (route.name === 'connect' && !route.first) { setRoute({ name: 'sessions' }); return true; }
+      if (connecting && cfg) {
+        setConnecting(false);
+        return true;
+      }
       return false;
     });
     return () => sub.remove();
-  }, [route]);
+  }, [connecting, cfg]);
 
-  const openTerminal = (session?: string) => setRoute({ name: 'terminal', session, key: ++keyRef.current });
-  const fadeKey = route.name === 'terminal' ? `t${route.key}` : route.name;
+  if (!booted) return <View style={{ flex: 1, backgroundColor: t.bg }} />;
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <StatusBar style={t.mode === 'dark' ? 'light' : 'dark'} />
-      <Fade k={fadeKey}>
-        {route.name === 'connect' ? (
+      {cfg ? (
+        <Workspace
+          key={`${cfg.host}:${cfg.port}:${cfg.tls}:${cfg.token}`}
+          cfg={cfg}
+          onHost={() => setConnecting(true)}
+        />
+      ) : null}
+      {connecting ? (
+        <View style={[StyleSheet.absoluteFill, { zIndex: 10, backgroundColor: t.bg }]}>
+          <Fade k="connect">
           <ConnectScreen
             initial={cfg}
-            onDone={(h) => { setCfg(h); setRoute({ name: 'sessions' }); }}
-            onCancel={route.first ? undefined : () => setRoute({ name: 'sessions' })}
+            onDone={(host) => { setCfg(host); setConnecting(false); }}
+            onCancel={cfg ? () => setConnecting(false) : undefined}
           />
-        ) : route.name === 'sessions' && cfg ? (
-          <SessionsScreen
-            cfg={cfg}
-            onOpen={openTerminal}
-            onNew={() => openTerminal(undefined)}
-            onHost={() => setRoute({ name: 'connect', first: false })}
-          />
-        ) : route.name === 'terminal' && cfg ? (
-          <TerminalScreen
-            key={route.key}
-            cfg={cfg}
-            session={route.session}
-            onBack={() => setRoute({ name: 'sessions' })}
-            onRestart={() => openTerminal(undefined)}
-          />
-        ) : null}
-      </Fade>
+          </Fade>
+        </View>
+      ) : null}
     </View>
   );
 }
