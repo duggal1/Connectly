@@ -1,68 +1,110 @@
-# Connectly
+<p align="center">
+  <img src="app/public/logo.svg" alt="Connectly pixel logo" width="96" />
+</p>
 
-Persistent, full-fidelity remote PTY. A Go daemon runs on the Mac; an Expo (React Native) app on Android renders xterm.js and streams over a binary-framed WebSocket.
+<h1 align="center">Connectly</h1>
 
-## Layout
+<p align="center">A native mobile terminal for your Mac. Run any CLI over a private connection, without SSH.</p>
 
-- `daemon/` — Go daemon (PTY, WebSocket, auth, session store, launchd).
-- `app/` — Expo React Native Android client (xterm.js in WebView).
+<p align="center">Go · Expo · React Native · xterm.js · WebSocket</p>
 
-## Mac daemon
+## Why I built it
 
-Requirements: Go 1.23+.
+I use OpenCode a lot, but its remote workflow was not reliable enough for daily work. I tried three native apps and still wanted a simpler boundary. Codex has a native route, but it is not the CLI I use most. I wanted to reach the Mac's shell and run OpenCode, Codex, or any other CLI there. The terminal should belong to the machine, not to one tool.
 
-```
-cd daemon
-make build
-./remote-pty config          # show config
-./remote-pty token           # mint a client token
-./remote-pty serve            # run (default :8765)
-```
+Connectly gives me that path from a phone. A Go daemon owns the shell sessions on the Mac. The app connects over a private network, with no SSH server, CLI-specific bridge, or hosted relay in the middle.
 
-Config lives at `~/.config/remote-pty/config.yaml` (auto-created). Set `tls_cert`/`tls_key` for TLS, or put it behind Tailscale/Cloudflare Tunnel.
+## Architecture
 
-Install as a service:
-
-```
-make install
-cp launchd/com.remotepty.daemon.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.remotepty.daemon.plist
+```mermaid
+flowchart LR
+  Phone[Connectly app] <-->|HTTP API and binary WebSocket| Daemon[termd on macOS]
+  Daemon --> PTY[Login shell and PTY sessions]
+  Agent[Local MCP client] <-->|stdio| MCP[termd mcp]
+  MCP <-->|HTTP over 0600 Unix socket| Daemon
+  Daemon -. leased VNC bridge .-> Screen[macOS Screen Sharing]
 ```
 
-## Android app
+The Expo app uses React Native for its interface and xterm.js in a WebView for terminal rendering. The daemon owns PTYs, session state, authentication, and Mac APIs. A binary-framed WebSocket carries terminal input and output. HTTP carries stats and configured Mac actions.
 
-Requirements: Node 20+, Expo CLI.
+Remote requests use a bearer token. The daemon rate-limits failed authentication and audits actions without logging clipboard contents. Tailscale is the recommended network path; TLS is supported when configured. Local MCP clients use `termd mcp` over stdio and a Unix socket with mode `0600`. The MCP server shares configured actions, but has no remote port and cannot end sessions or start screen sharing.
 
+## What it does
+
+- Runs any CLI available in the Mac login shell through a PTY.
+- Keeps sessions alive across phone disconnects and resumes them when the app reconnects.
+- Supports five open terminal tabs and up to 16 daemon sessions by default.
+- Shows battery, charging, lid, and load status.
+- Offers allow-listed actions, clipboard and volume controls, and paths restricted to configured roots.
+- Starts time-limited Screen Sharing through a short-lived, single-use VNC ticket.
+- Exposes session status and configured actions to local MCP-compatible clients.
+
+## Product decisions
+
+I chose a PTY because it gives every CLI the same shell entry point. Connectly does not wrap OpenCode or expose an arbitrary remote-command endpoint. The phone can invoke only action IDs configured on the Mac; script paths and arguments stay in that configuration.
+
+There is no cloud account, relay, or separate session-history database. Tailscale provides the private route, and the daemon keeps active and detached sessions in memory. Push notifications and an always-on Android background service are also out of scope because they require extra services and lifecycle behavior.
+
+## Run it
+
+You need a Mac with Go 1.23 or later, Node.js, and Tailscale on both the Mac and phone.
+
+Install the daemon on the Mac with its Tailscale IPv4 address:
+
+```bash
+./daemon/install.sh <mac-tailscale-ip> [port]
+/usr/local/bin/termd --print-token
 ```
+
+The installer builds `termd`, creates a LaunchAgent, and installs the narrow `sudoers` rules for sleep control and Screen Sharing. The default port is `7681`.
+
+Start the app:
+
+```bash
 cd app
-npm install
+npm ci
 npx expo start --android
 ```
 
-Enter the Mac's host (Tailscale IP or LAN IP), port (8765), and a token from `remote-pty token`. Tap Connect.
+The Expo app is configured for Android and iOS. Enter the Mac's Tailscale IP, port, and token on the Connect screen.
 
-## Protocol
+## Configure Mac actions
 
-Binary framed over WebSocket. Each message: `[1 byte type][4 bytes length (BE)][payload]`.
+Actions are disabled unless enabled in `~/.config/connectly-termd/actions.json`:
 
-- 0x01 stdin
-- 0x02 stdout
-- 0x03 stderr
-- 0x04 resize (cols, rows as u16)
-- 0x05 control (JSON: op, token, session_id, resume_token, cols, rows, signal)
-- 0x06 heartbeat
+```json
+{
+  "clipboard": true,
+  "volume": false,
+  "roots": ["~/Projects"],
+  "actions": [
+    {
+      "id": "run-tests",
+      "label": "Run tests",
+      "kind": "script",
+      "target": "~/bin/run-tests.sh",
+      "timeoutSec": 300
+    }
+  ]
+}
+```
 
-Auth: first control message `{op:"auth", token}` or `?token=` query param. Sessions can be resumed via `{op:"resume", resume_token}`.
+Action kinds are `app`, `path`, `shortcut`, and `script`. Scripts must be executable. Restart `termd` after changing the file:
 
-## Known limitations
+```bash
+launchctl kickstart -k gui/$(id -u)/dev.connectly.termd
+```
 
-- Android foreground service / wake lock for background streaming is not yet implemented; the app reconnects on foreground. Add a native foreground-service module for always-on sessions.
-- Terminal rendering depends on CDN-hosted xterm.js; bundle locally for offline use.
-- Daemon wake lock uses `caffeinate`; lid-closed survival still depends on macOS power settings / clamshell mode.
+To add the local MCP server to Claude Code, run `claude mcp add connectly -- /usr/local/bin/termd mcp`. Other local MCP clients can launch the same stdio command.
 
-## Security
+## Strengths and limits
 
-- Never expose without auth. Prefer Tailscale.
-- Token auth (JWT HS256 or raw shared secret) on every connection.
-- Rate limiting per IP.
-- Audit log at `~/.local/share/remote-pty/audit.log`.
+Connectly is strongest as a direct, CLI-agnostic terminal with controlled Mac actions. Sessions live in daemon memory, so they survive phone disconnects but not daemon restarts. Detached sessions are removed after 24 hours by default. The app reconnects in the foreground, but does not keep a reliable background connection alive.
+
+The terminal renderer and noVNC load pinned packages from jsDelivr, so the phone needs internet access to load them. Screen viewing depends on macOS Screen Sharing and account authentication. It is view-and-tap only, without a remote keyboard. A lease expires after five minutes by default; if Screen Sharing was already on, Connectly leaves it on.
+
+Lid-closed operation depends on macOS power behavior and the `sudoers` rule from `install.sh`. Test it on the target Mac before relying on it. Do not expose the daemon to the public internet. Use Tailscale or configure TLS and a private firewall.
+
+## License
+
+Connectly is released under the [MIT License](LICENSE).
