@@ -24,7 +24,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () => void }) {
   const theme = useTok();
   const insets = useSafeAreaInsets();
-  const active = useRef(true);
+  const generation = useRef(0);
   const [ticket, setTicket] = useState<string | null>(null);
   const [deadline, setDeadline] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -41,10 +41,10 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
   }, [cfg]);
 
   useEffect(() => {
-    active.current = true;
+    const requestGeneration = ++generation.current;
     void requestGrant()
       .then((grant) => {
-        if (!active.current) {
+        if (generation.current !== requestGeneration) {
           stop();
           return;
         }
@@ -52,10 +52,10 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
         setTicket(grant.ticket);
       })
       .catch((cause: unknown) => {
-        if (active.current) setError(errorMessage(cause));
+        if (generation.current === requestGeneration) setError(errorMessage(cause));
       });
     return () => {
-      active.current = false;
+      if (generation.current === requestGeneration) generation.current++;
       stop();
     };
   }, [requestGrant, stop]);
@@ -86,13 +86,18 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
       setError(typeof value.message === 'string' ? value.message : 'Screen Sharing sign-in failed.');
     } else if (value.t === 'disconnect') {
       setLive(false);
-      if (!error) setError(value.clean ? 'Screen sharing ended.' : 'Connection lost.');
+      setError((previous) => previous || (value.clean ? 'Screen sharing ended.' : 'Connection lost.'));
     }
   };
 
   const extend = async () => {
+    const requestGeneration = generation.current;
     try {
       const grant = await requestGrant();
+      if (generation.current !== requestGeneration) {
+        stop();
+        return;
+      }
       setDeadline(Date.now() + grant.ttlSec * 1000);
       setTicket(grant.ticket);
       setLive(false);
