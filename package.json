@@ -1,0 +1,16 @@
+{
+  "name": "connectly",
+  "private": true,
+  "scripts": {
+    "dev": "bash dev.sh",
+    "sync": "bash sync.sh",
+    "dev:daemon": "cd daemon && env -u LUMEN_TOKEN go run . --token-file \"$HOME/.config/lumen-termd/token\" --listen \"$(tailscale ip -4):7681\"",
+    "dev:app": "cd app && ./node_modules/.bin/expo start --tunnel ngrok",
+    "build:daemon": "cd daemon && go build -o termd .",
+    "build:app": "cd app && npx expo export --platform android",
+    "build": "bun run build:daemon && bun run build:app"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

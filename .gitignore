@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Expo and generated builds
+.expo/
+**/.expo/
+dist/
+web-build/
+coverage/
+app/android/
+app/ios/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+
+# Build artifacts and local files
+daemon/termd
+*.tsbuildinfo
+*.log
+.DS_Store

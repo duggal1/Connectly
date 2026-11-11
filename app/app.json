@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Connectly",
+    "slug": "connectly",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "icon": "./public/logo.svg",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.connectly.app",
+      "infoPlist": {
+        "NSAppTransportSecurity": { "NSAllowsArbitraryLoads": true },
+        "NSLocalNetworkUsageDescription": "Connects to the terminal daemon on your Mac."
+      }
+    },
+    "android": {
+      "package": "dev.connectly.app",
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "plugins": [
+      "expo-secure-store",
+      ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]
+    ],
+    "web": {
+      "favicon": "./public/logo.svg"
+    }
+  }
+}
