@@ -88,6 +88,7 @@ func (s *Server) mountActions(mux *http.ServeMux, wrap func(http.HandlerFunc) ht
 			Text string `json:"text"`
 		}
 		if !readJSON(w, r, &body) {
+			s.audit(r, remote, "clipboard.set", "ok", false, "error", "bad request")
 			return
 		}
 		if err := s.act.ClipboardSet(body.Text); err != nil {
@@ -104,9 +105,11 @@ func (s *Server) mountActions(mux *http.ServeMux, wrap func(http.HandlerFunc) ht
 			Level *int `json:"level"`
 		}
 		if !readJSON(w, r, &body) {
+			s.audit(r, remote, "volume", "ok", false, "error", "bad request")
 			return
 		}
 		if body.Level == nil {
+			s.audit(r, remote, "volume", "ok", false, "error", "missing level")
 			http.Error(w, "level is required", http.StatusBadRequest)
 			return
 		}
@@ -124,6 +127,7 @@ func (s *Server) mountActions(mux *http.ServeMux, wrap func(http.HandlerFunc) ht
 			Path string `json:"path"`
 		}
 		if !readJSON(w, r, &body) {
+			s.audit(r, remote, "open", "ok", false, "error", "bad request")
 			return
 		}
 		if err := s.act.OpenPath(body.Path); err != nil {
@@ -139,6 +143,7 @@ func (s *Server) mountActions(mux *http.ServeMux, wrap func(http.HandlerFunc) ht
 func (s *Server) mountVisual(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/visual", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		if s.vis == nil {
+			s.audit(r, true, "visual.status", "ok", false, "error", "disabled")
 			fail(w, errDisabled)
 			return
 		}
@@ -149,28 +154,47 @@ func (s *Server) mountVisual(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /api/visual/start", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		if s.vis == nil {
+			s.audit(r, true, "visual.start", "ok", false, "error", "disabled")
 			fail(w, errDisabled)
 			return
 		}
-		ticket, ttl, err := s.vis.Start()
+		var body struct {
+			Lease string `json:"lease"`
+		}
+		if r.ContentLength != 0 && !readJSON(w, r, &body) {
+			s.audit(r, true, "visual.start", "ok", false, "error", "bad request")
+			return
+		}
+		ticket, lease, ttl, err := s.vis.Start(body.Lease)
 		if err != nil {
 			s.audit(r, true, "visual.start", "ok", false, "error", err.Error())
 			fail(w, err)
 			return
 		}
-		s.audit(r, true, "visual.start", "ok", true)
-		writeJSON(w, http.StatusOK, map[string]any{"ticket": ticket, "ttlSec": int(ttl.Seconds())})
+		s.audit(r, true, "visual.start", "ok", true, "extended", body.Lease != "")
+		writeJSON(w, http.StatusOK, map[string]any{"ticket": ticket, "lease": lease, "ttlSec": int(ttl.Seconds())})
 	}))
 
 	mux.HandleFunc("POST /api/visual/stop", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		if s.vis != nil {
-			s.vis.Stop()
+		var body struct {
+			Lease string `json:"lease"`
 		}
-		s.audit(r, true, "visual.stop")
+		if !readJSON(w, r, &body) {
+			s.audit(r, true, "visual.stop", "ok", false, "error", "bad request")
+			return
+		}
+		if body.Lease == "" {
+			s.audit(r, true, "visual.stop", "ok", false, "error", "lease required")
+			http.Error(w, "lease is required", http.StatusBadRequest)
+			return
+		}
+		stopped := s.vis != nil && s.vis.Stop(body.Lease)
+		s.audit(r, true, "visual.stop", "ok", stopped)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
 	mux.HandleFunc("GET /vnc", func(w http.ResponseWriter, r *http.Request) {
+		s.audit(r, true, "visual.bridge.request")
 		if s.vis == nil {
 			http.NotFound(w, r)
 			return

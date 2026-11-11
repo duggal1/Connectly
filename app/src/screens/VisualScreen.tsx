@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { api, ApiError, wsUrl } from '../lib/api';
+import { api, ApiError, json, wsUrl } from '../lib/api';
 import type { VisualGrant } from '../lib/api';
 import type { HostConfig } from '../lib/storage';
 import { vncHtml } from '../terminal/vncHtml';
@@ -25,19 +25,21 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
   const theme = useTok();
   const insets = useSafeAreaInsets();
   const generation = useRef(0);
+  const leaseRef = useRef<string | null>(null);
   const [ticket, setTicket] = useState<string | null>(null);
   const [deadline, setDeadline] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [live, setLive] = useState(false);
   const [error, setError] = useState('');
+  const [extending, setExtending] = useState(false);
 
   const requestGrant = useCallback(
-    () => api<VisualGrant>(cfg, '/api/visual/start', { method: 'POST' }, 20000),
+    (lease?: string) => api<VisualGrant>(cfg, '/api/visual/start', json('POST', { lease }), 20000),
     [cfg],
   );
 
-  const stop = useCallback(() => {
-    void api<void>(cfg, '/api/visual/stop', { method: 'POST' }).catch(() => {});
+  const stopLease = useCallback((lease: string) => {
+    void api<void>(cfg, '/api/visual/stop', json('POST', { lease })).catch(() => {});
   }, [cfg]);
 
   useEffect(() => {
@@ -45,9 +47,10 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
     void requestGrant()
       .then((grant) => {
         if (generation.current !== requestGeneration) {
-          stop();
+          stopLease(grant.lease);
           return;
         }
+        leaseRef.current = grant.lease;
         setDeadline(Date.now() + grant.ttlSec * 1000);
         setTicket(grant.ticket);
       })
@@ -56,9 +59,11 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
       });
     return () => {
       if (generation.current === requestGeneration) generation.current++;
-      stop();
+      const lease = leaseRef.current;
+      leaseRef.current = null;
+      if (lease) stopLease(lease);
     };
-  }, [requestGrant, stop]);
+  }, [requestGrant, stopLease]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -86,24 +91,28 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
       setError(typeof value.message === 'string' ? value.message : 'Screen Sharing sign-in failed.');
     } else if (value.t === 'disconnect') {
       setLive(false);
-      setError((previous) => previous || (value.clean ? 'Screen sharing ended.' : 'Connection lost.'));
+      setError((previous) => previous || (value.clean === true ? 'Screen sharing ended.' : 'Connection lost.'));
     }
   };
 
   const extend = async () => {
     const requestGeneration = generation.current;
+    setExtending(true);
     try {
-      const grant = await requestGrant();
+      const grant = await requestGrant(leaseRef.current ?? undefined);
       if (generation.current !== requestGeneration) {
-        stop();
+        stopLease(grant.lease);
         return;
       }
+      leaseRef.current = grant.lease;
       setDeadline(Date.now() + grant.ttlSec * 1000);
       setTicket(grant.ticket);
       setLive(false);
       setError('');
     } catch (cause: unknown) {
       setError(errorMessage(cause));
+    } finally {
+      if (generation.current === requestGeneration) setExtending(false);
     }
   };
 
@@ -116,7 +125,7 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
         <Button label="Done" kind="quiet" height={H.small} onPress={onClose} />
         <Txt kind="title" style={{ flex: 1 }}>Screen</Txt>
         {deadline > 0 ? <Txt kind="caption" tone="text2" style={tabular}>{clock}</Txt> : null}
-        <Button label="Extend" kind="quiet" height={H.small} disabled={!ticket || !!error} onPress={() => void extend()} />
+        <Button label={extending ? 'Extending' : 'Extend'} kind="quiet" height={H.small} disabled={!ticket || extending} onPress={() => void extend()} />
       </View>
 
       <View style={{ flex: 1, marginBottom: insets.bottom }}>

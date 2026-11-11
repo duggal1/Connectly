@@ -86,5 +86,19 @@ if [[ "$STATS_STATUS" == "404" ]]; then
   exit 1
 fi
 
+if [[ -f "$TOKEN_FILE" ]]; then
+  TOKEN_VALUE="$(cat "$TOKEN_FILE")"
+  CAPABILITIES_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 \
+    -H "Authorization: Bearer $TOKEN_VALUE" "http://$LISTEN_ADDR/api/capabilities" 2>/dev/null || true)"
+  if [[ "$CAPABILITIES_STATUS" == "404" ]]; then
+    echo "The daemon at $LISTEN_ADDR is an older build without Mac Actions. Stop that daemon and restart bun dev to rebuild it from this source tree." >&2
+    exit 1
+  fi
+  if [[ "$CAPABILITIES_STATUS" == "401" ]]; then
+    echo "The daemon at $LISTEN_ADDR rejected the token in $TOKEN_FILE. Reconnect the host with the daemon's current token." >&2
+    exit 1
+  fi
+fi
+
 cd "$ROOT/app"
 env -u NO_COLOR ./node_modules/.bin/expo start --tunnel ngrok --port 8081

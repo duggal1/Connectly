@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import type { HostConfig } from './storage';
@@ -42,9 +42,9 @@ function remove(state: TabsState, drop: (tab: Tab) => boolean): TabsState {
   }
 
   const index = state.tabs.findIndex((tab) => tab.key === state.pane.key);
-	const remaining = (tab: Tab) => !drop(tab);
-	const next = state.tabs.slice(index + 1).find(remaining) ?? state.tabs.slice(0, index).reverse().find(remaining);
-	return { tabs, pane: next ? { kind: 'tab', key: next.key } : { kind: 'sessions' } };
+  const remaining = (tab: Tab) => !drop(tab);
+  const next = state.tabs.slice(index + 1).find(remaining) ?? state.tabs.slice(0, index).reverse().find(remaining);
+  return { tabs, pane: next ? { kind: 'tab', key: next.key } : { kind: 'sessions' } };
 }
 
 export function tabsReducer(state: TabsState, action: TabAction): TabsState {
@@ -61,6 +61,7 @@ export function tabsReducer(state: TabsState, action: TabAction): TabsState {
       return { tabs, pane: { kind: 'tab', key: action.key } };
     }
     case 'bind':
+      if (!state.tabs.some((tab) => tab.key === action.key && tab.session !== action.session)) return state;
       return {
         ...state,
         tabs: state.tabs.map((tab) => tab.key === action.key ? { ...tab, session: action.session } : tab),
@@ -70,6 +71,7 @@ export function tabsReducer(state: TabsState, action: TabAction): TabsState {
     case 'closeSession':
       return remove(state, (tab) => tab.session === action.session);
     case 'restart':
+      if (!state.tabs.some((tab) => tab.key === action.key)) return state;
       return {
         tabs: state.tabs.map((tab) => tab.key === action.key ? { key: action.next } : tab),
         pane: state.pane.kind === 'tab' && state.pane.key === action.key
@@ -94,6 +96,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 function storeKey(cfg: HostConfig): string {
   const source = `${cfg.host}:${cfg.port}:${cfg.tls ? 'tls' : 'plain'}`;
   let hash = 2166136261;
@@ -107,7 +113,7 @@ function storeKey(cfg: HostConfig): string {
 function parseSaved(raw: string): SavedTabs | null {
   try {
     const value: unknown = JSON.parse(raw);
-    if (!isRecord(value) || !Array.isArray(value.tabs)) return null;
+    if (!isRecord(value) || !isArray(value.tabs)) return null;
     const tabs: SavedTabs['tabs'] = [];
     for (const entry of value.tabs) {
       if (!isRecord(entry) || typeof entry.key !== 'string' || typeof entry.session !== 'string') return null;
@@ -135,18 +141,20 @@ async function loadState(key: string): Promise<TabsState> {
   }
 }
 
-async function saveState(key: string, state: TabsState): Promise<void> {
+function serializeState(state: TabsState): string {
   const tabs = state.tabs.filter((tab): tab is Tab & { session: string } => Boolean(tab.session));
-  const active = state.pane.kind === 'tab' && tabs.some((tab) => tab.key === state.pane.key)
-    ? state.pane.key
+  const activeKey = state.pane.kind === 'tab' ? state.pane.key : undefined;
+  const active = activeKey && tabs.some((tab) => tab.key === activeKey)
+    ? activeKey
     : undefined;
   const saved: SavedTabs = { tabs, active };
-  await SecureStore.setItemAsync(key, JSON.stringify(saved));
+  return JSON.stringify(saved);
 }
 
 export function useTabs(cfg: HostConfig): [TabsState, Dispatch<TabAction>, boolean] {
   const key = storeKey(cfg);
   const [stored, setStored] = useState<StoredState>({ key, ready: false, state: INITIAL });
+  const writes = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let active = true;
@@ -159,7 +167,11 @@ export function useTabs(cfg: HostConfig): [TabsState, Dispatch<TabAction>, boole
 
   useEffect(() => {
     if (stored.key !== key || !stored.ready) return;
-    void saveState(key, stored.state).catch(() => {});
+    const serialized = serializeState(stored.state);
+    writes.current = writes.current
+      .catch(() => {})
+      .then(() => SecureStore.setItemAsync(key, serialized))
+      .catch(() => {});
   }, [key, stored]);
 
   const dispatch = useCallback<Dispatch<TabAction>>((action) => {

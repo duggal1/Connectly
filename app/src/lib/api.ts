@@ -157,6 +157,7 @@ export interface ActionResult {
 
 export interface VisualGrant {
   ticket: string;
+  lease: string;
   ttlSec: number;
 }
 

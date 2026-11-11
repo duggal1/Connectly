@@ -266,7 +266,7 @@ func (a *Actions) ClipboardGet() (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", err
 	}
-	return strings.ToValidUTF8(out.buf.String(), ""), nil
+	return strings.ToValidUTF8(out.String(), ""), nil
 }
 
 func (a *Actions) ClipboardSet(text string) error {
@@ -293,6 +293,9 @@ func (a *Actions) SetVolume(level int) error {
 	}
 	result := execute(5*time.Second, "/usr/bin/osascript", "-e", "set volume output volume "+strconv.Itoa(level))
 	if !result.OK {
+		if result.Output == "" {
+			return fmt.Errorf("set volume failed with exit code %d", result.Code)
+		}
 		return errors.New(result.Output)
 	}
 	return nil
@@ -315,6 +318,9 @@ func (a *Actions) OpenPath(path string) error {
 		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			result := execute(10*time.Second, "/usr/bin/open", real)
 			if !result.OK {
+				if result.Output == "" {
+					return fmt.Errorf("open failed with exit code %d", result.Code)
+				}
 				return errors.New(result.Output)
 			}
 			return nil
@@ -326,11 +332,14 @@ func (a *Actions) OpenPath(path string) error {
 func utf8Env() []string { return append(os.Environ(), "LANG=en_US.UTF-8") }
 
 type capped struct {
+	mu  sync.Mutex
 	buf bytes.Buffer
 	max int
 }
 
 func (c *capped) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if room := c.max - c.buf.Len(); room > 0 {
 		if len(p) > room {
 			_, _ = c.buf.Write(p[:room])
@@ -339,6 +348,12 @@ func (c *capped) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+func (c *capped) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
 }
 
 func execute(timeout time.Duration, name string, args ...string) Result {
@@ -357,7 +372,7 @@ func execute(timeout time.Duration, name string, args ...string) Result {
 	cmd.Stdout, cmd.Stderr = out, out
 	started := time.Now()
 	err := cmd.Run()
-	result := Result{OK: err == nil, Output: strings.TrimSpace(out.buf.String()), Ms: time.Since(started).Milliseconds()}
+	result := Result{OK: err == nil, Output: strings.TrimSpace(out.String()), Ms: time.Since(started).Milliseconds()}
 	if err != nil {
 		var exitErr *exec.ExitError
 		switch {

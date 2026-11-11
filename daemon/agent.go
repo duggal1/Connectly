@@ -66,16 +66,19 @@ func serveAgent(ctx context.Context, path string, handler http.Handler) error {
 		}
 	}()
 
+	serveContext, cancel := context.WithCancel(ctx)
+	defer cancel()
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		<-ctx.Done()
+		<-serveContext.Done()
 		_ = server.Close()
 	}()
 	err = server.Serve(listener)
+	cancel()
+	<-stopped
 	if ctx.Err() != nil {
-		<-stopped
 		return nil
 	}
 	if errors.Is(err, http.ErrServerClosed) {

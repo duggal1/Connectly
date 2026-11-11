@@ -120,23 +120,25 @@ func buildMCPTools() []mcpTool {
 		{
 			Name: "mac_status", Description: "Battery, charging state, lid state and load of this Mac.",
 			InputSchema: schema(nil, map[string]any{}),
-			run: func(agent *mcp, _ json.RawMessage) (string, error) { return agent.do("GET", "/api/stats", nil) },
+			run:         func(agent *mcp, _ json.RawMessage) (string, error) { return agent.do("GET", "/api/stats", nil) },
 		},
 		{
 			Name: "list_sessions", Description: "Terminal sessions on this Mac and whether a phone is attached.",
 			InputSchema: schema(nil, map[string]any{}),
-			run: func(agent *mcp, _ json.RawMessage) (string, error) { return agent.do("GET", "/api/sessions", nil) },
+			run:         func(agent *mcp, _ json.RawMessage) (string, error) { return agent.do("GET", "/api/sessions", nil) },
 		},
 		{
 			Name: "list_actions", Description: "Allow-listed actions and enabled built-in controls.",
 			InputSchema: schema(nil, map[string]any{}),
-			run: func(agent *mcp, _ json.RawMessage) (string, error) { return agent.do("GET", "/api/capabilities", nil) },
+			run:         func(agent *mcp, _ json.RawMessage) (string, error) { return agent.do("GET", "/api/capabilities", nil) },
 		},
 		{
 			Name: "run_action", Description: "Run one configured action by id. Arguments cannot be supplied.",
 			InputSchema: schema([]string{"id"}, map[string]any{"id": prop("string", "Action id from list_actions")}),
 			run: func(agent *mcp, raw json.RawMessage) (string, error) {
-				var args struct{ ID string `json:"id"` }
+				var args struct {
+					ID string `json:"id"`
+				}
 				if err := decodeToolArgs(raw, &args); err != nil || args.ID == "" {
 					return "", errors.New("id is required")
 				}
@@ -146,13 +148,15 @@ func buildMCPTools() []mcpTool {
 		{
 			Name: "clipboard_get", Description: "Read Mac clipboard text when clipboard access is enabled.",
 			InputSchema: schema(nil, map[string]any{}),
-			run: func(agent *mcp, _ json.RawMessage) (string, error) { return agent.do("GET", "/api/clipboard", nil) },
+			run:         func(agent *mcp, _ json.RawMessage) (string, error) { return agent.do("GET", "/api/clipboard", nil) },
 		},
 		{
 			Name: "clipboard_set", Description: "Replace Mac clipboard text (up to 64 KB).",
 			InputSchema: schema([]string{"text"}, map[string]any{"text": prop("string", "Text, up to 64 KB")}),
 			run: func(agent *mcp, raw json.RawMessage) (string, error) {
-				var args struct{ Text *string `json:"text"` }
+				var args struct {
+					Text *string `json:"text"`
+				}
 				if err := decodeToolArgs(raw, &args); err != nil || args.Text == nil {
 					return "", errors.New("text is required")
 				}
@@ -163,7 +167,9 @@ func buildMCPTools() []mcpTool {
 			Name: "open_path", Description: "Open a file or folder inside a configured actions.json root.",
 			InputSchema: schema([]string{"path"}, map[string]any{"path": prop("string", "Absolute path")}),
 			run: func(agent *mcp, raw json.RawMessage) (string, error) {
-				var args struct{ Path string `json:"path"` }
+				var args struct {
+					Path string `json:"path"`
+				}
 				if err := decodeToolArgs(raw, &args); err != nil || args.Path == "" {
 					return "", errors.New("path is required")
 				}
@@ -174,7 +180,9 @@ func buildMCPTools() []mcpTool {
 			Name: "set_volume", Description: "Set Mac output volume from 0 to 100 when volume control is enabled.",
 			InputSchema: schema([]string{"level"}, map[string]any{"level": prop("integer", "0 to 100")}),
 			run: func(agent *mcp, raw json.RawMessage) (string, error) {
-				var args struct{ Level *int `json:"level"` }
+				var args struct {
+					Level *int `json:"level"`
+				}
 				if err := decodeToolArgs(raw, &args); err != nil || args.Level == nil {
 					return "", errors.New("level is required")
 				}
@@ -194,7 +202,9 @@ func toolResult(text string, isError bool) map[string]any {
 func (m *mcp) handle(request rpcReq) (any, *rpcErr) {
 	switch request.Method {
 	case "initialize":
-		var params struct{ ProtocolVersion string `json:"protocolVersion"` }
+		var params struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
 		_ = json.Unmarshal(request.Params, &params)
 		version := mcpVersions[0]
 		for _, supported := range mcpVersions {

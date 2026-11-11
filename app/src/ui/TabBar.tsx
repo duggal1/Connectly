@@ -26,31 +26,32 @@ function Chip({
   const theme = useTok();
   const [pressed, setPressed] = useState(false);
   return (
-    <Pressable
-      accessibilityRole="tab"
-      accessibilityState={{ selected }}
-      accessibilityLabel={label}
-      onPressIn={() => setPressed(true)}
-      onPressOut={() => setPressed(false)}
-      onPress={() => {
-        Haptics.selectionAsync().catch(() => {});
-        onPress();
-      }}
+    <View
       style={{
         height: 36,
         maxWidth: 168,
         borderRadius: 18,
-        paddingLeft: 12,
-        paddingRight: onClose ? 4 : 12,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
         backgroundColor: selected ? theme.control : pressed ? theme.wash : 'transparent',
       }}
     >
-      <Txt kind="label" tone={selected ? 'text' : 'text2'} numberOfLines={1} style={{ flexShrink: 1 }}>
-        {label}
-      </Txt>
+      <Pressable
+        accessibilityRole="tab"
+        accessibilityState={{ selected }}
+        accessibilityLabel={label}
+        onPressIn={() => setPressed(true)}
+        onPressOut={() => setPressed(false)}
+        onPress={() => {
+          Haptics.selectionAsync().catch(() => {});
+          onPress();
+        }}
+        style={{ height: 36, flex: 1, minWidth: 0, paddingLeft: 12, paddingRight: onClose ? 0 : 12, justifyContent: 'center' }}
+      >
+        <Txt kind="label" tone={selected ? 'text' : 'text2'} numberOfLines={1} style={{ flexShrink: 1 }}>
+          {label}
+        </Txt>
+      </Pressable>
       {onClose ? (
         <Pressable
           onPress={onClose}
@@ -62,7 +63,7 @@ function Chip({
           <PixelMark name="failed" cell={1} colors={{ '#': theme.text2 }} />
         </Pressable>
       ) : null}
-    </Pressable>
+    </View>
   );
 }
 
