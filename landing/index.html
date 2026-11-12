@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Connectly — your Mac, in your pocket</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&family=Instrument+Serif:ital@1&display=swap">
+<link rel="stylesheet" href="styling.css"></head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="ap" viewBox="0 0 3 3"><rect width="3" height="3" fill="currentColor"/><rect x="1" y="1" width="1" height="1" fill="#fff"/></symbol></svg>
+
+<header class="w"><nav>
+<a class="brand" href="#top"><svg class="ap"><use href="#ap"/></svg>Connectly</a>
+<a class="btn sm" href="#get">Download</a>
+</nav></header>
+
+<main id="top" class="w hero">
+<h1>Your Mac stays home.<span>Your work doesn’t.<svg class="ap"><use href="#ap"/></svg></span></h1>
+<p class="lede">Connectly is a private terminal bridge from your phone to the Mac you left behind. Real shells, real scrollback, no cloud in between.</p>
+<div class="cta">
+<a class="btn p" href="#get">Download for iOS</a>
+<a class="btn" href="#get">Get it for Android</a>
+</div>
+<p class="meta">Runs on your Mac over Tailscale. One token. No account.</p>
+
+<div class="scene" aria-label="Animated demo: a phone typing into a Mac terminal">
+<div class="mac" id="mac">
+<div class="lid">
+<div class="scr"><div class="cap">Mac · termd · session 4f2a</div><pre class="tx" id="mt"></pre></div>
+<svg viewBox="0 0 520 330"><rect x="2.5" y="2.5" width="515" height="325" rx="26" fill="none" stroke="#27272a" stroke-width="5"/><circle cx="260" cy="11" r="2.5" fill="#07e00a"/></svg>
+</div>
+<svg class="base" viewBox="0 0 620 18"><path d="M1 1H619V6Q619 17 596 17H24Q1 17 1 6Z" fill="#101010" stroke="#27272a" stroke-width="2"/><rect x="250" y="1" width="120" height="6" rx="3" fill="#1A1A1A"/></svg>
+</div>
+<div class="link" id="lk" aria-hidden="true"></div>
+<div class="phone">
+<div class="ps">
+<div class="ph" id="ph"><span>Term 4f2a</span><em id="ls">Live</em></div>
+<div class="st" id="pst">Mac 86%, lid open · echo 38 ms</div>
+<pre class="tx pt" id="pt"></pre>
+<div class="pn" id="pn" role="status"></div>
+<div class="kb"><b>esc</b><b>tab</b><b>ctrl</b><b>↑</b><b>↓</b></div>
+</div>
+<svg viewBox="0 0 340 700"><rect x="9" y="9.5" width="322" height="681" rx="63" ry="63" fill="none" stroke="#27272a" stroke-width="5"/><rect x="122" y="24" width="96" height="28" rx="14" ry="14" fill="#171717" stroke="#262626"/><circle cx="186" cy="38" r="2.8" fill="#07e00a"/></svg>
+</div>
+</div>
+
+<div class="ctl">
+<button class="btn" id="bl" type="button">Close the lid</button>
+<button class="btn" id="bd" type="button">Drop signal</button>
+</div>
+<div class="ro">
+<div><span>Echo</span><b id="re">38 ms</b></div>
+<div><span>Link</span><b id="rl">Live</b></div>
+<div><span>Mac lid</span><b id="rm">Open</b></div>
+</div>
+</main>
+
+<section class="w" id="why">
+<h2 class="rv">Built for the walk out the door<svg class="ap"><use href="#ap"/></svg></h2>
+<p class="sub rv">Four promises, each one measured on the screen instead of claimed on a page.</p>
+<div class="rows">
+<div class="row rv"><span class="n">01</span><h3>Latency</h3><p>Keystroke to painted echo, measured inside the terminal.</p><span class="m" id="m1">38 ms</span></div>
+<div class="row rv"><span class="n">02</span><h3>Double recovery</h3><p>Signal gone for minutes. Same session, same scrollback, back in a second.</p><span class="m">0 B lost</span></div>
+<div class="row rv"><span class="n">03</span><h3>Lid closed</h3><p>Shut the lid and leave. The shells keep running on the Mac.</p><span class="m">Alive</span></div>
+<div class="row rv"><span class="n">04</span><h3>Live Mac stats</h3><p>Battery, charging, lid and load, pushed every ten seconds.</p><span class="m">86%</span></div>
+</div>
+</section>
+
+<section class="w">
+<h2 class="rv">Small by design<svg class="ap"><use href="#ap"/></svg></h2>
+<p class="sub rv">Everything beyond the terminal is allow-listed, token-gated and logged.</p>
+<div class="bento">
+<article class="c c4 rv"><h3>Recovery by byte offset</h3><p>The phone counts every byte it has drawn. On reconnect the Mac replays only the gap: no screen clear, no lost scrollback.</p><div class="strip" id="strip"></div><small>Resumed from byte 184,320 · gap 2.1 s</small></article>
+<article class="c c2 rv"><h3>Five live tabs</h3><p>Closing a tab detaches it. Ending a session is its own tap.</p><ul><li class="on">Term 4f2a</li><li>claude</li><li>Term 91c0</li><li>logs</li></ul></article>
+<article class="c c2 rv"><h3>Allow-listed actions</h3><p>The phone sends an id. Never a command.</p><ul><li>Open Xcode<i>Run</i></li><li>Work focus<i>Run</i></li><li>Run tests<i>Run</i></li></ul></article>
+<article class="c c2 rv"><h3>Screen, on demand</h3><p>Screen Sharing starts when you ask and turns itself off.</p><div class="big" id="cd">5:00</div></article>
+<article class="c c2 rv"><h3>Agent-native</h3><p>Claude Code on the Mac gets the same actions over a local socket.</p><code>claude mcp add connectly -- termd mcp</code></article>
+<article class="c c6 rv"><h3>Private by construction</h3><div class="tri"><div><b>No account</b><p>One token you generate on your own Mac.</p></div><div><b>No cloud relay</b><p>Phone to Mac over Tailscale. Nothing in between.</p></div><div><b>Rate-limited</b><p>Five wrong tokens and the door shuts for five minutes.</p></div></div></article>
+</div>
+</section>
+
+<div class="w">
+<div class="cta2 rv" id="get">
+<h2>Leave the laptop home.<svg class="ap"><use href="#ap"/></svg></h2>
+<p class="sub" style="margin-inline:auto">Install the daemon on your Mac, then connect the app with its address and token.</p>
+<div class="cta" style="margin-top:32px"><a class="btn p" href="#get">Download for iOS</a><a class="btn" href="#get">Get it for Android</a></div>
+<div class="inst"><code id="cmd">./install.sh 100.x.y.z</code><button class="btn sm" id="cp" type="button">Copy</button></div>
+</div>
+<footer><span>© 2026 Connectly</span><a href="#top">Back to top</a><span>One Mac. One phone.</span></footer>
+</div>
+
+<script src="main.js" defer></script>
+</body></html>
