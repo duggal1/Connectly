@@ -158,38 +158,21 @@ func (s *Server) mountVisual(mux *http.ServeMux) {
 			fail(w, errDisabled)
 			return
 		}
-		var body struct {
-			Lease string `json:"lease"`
-		}
-		if r.ContentLength != 0 && !readJSON(w, r, &body) {
-			s.audit(r, true, "visual.start", "ok", false, "error", "bad request")
-			return
-		}
-		ticket, lease, ttl, err := s.vis.Start(body.Lease)
+		ticket, ttl, err := s.vis.Start()
 		if err != nil {
 			s.audit(r, true, "visual.start", "ok", false, "error", err.Error())
 			fail(w, err)
 			return
 		}
-		s.audit(r, true, "visual.start", "ok", true, "extended", body.Lease != "")
-		writeJSON(w, http.StatusOK, map[string]any{"ticket": ticket, "lease": lease, "ttlSec": int(ttl.Seconds())})
+		s.audit(r, true, "visual.start", "ok", true)
+		writeJSON(w, http.StatusOK, map[string]any{"ticket": ticket, "ttlSec": int(ttl.Seconds())})
 	}))
 
 	mux.HandleFunc("POST /api/visual/stop", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Lease string `json:"lease"`
+		if s.vis != nil {
+			s.vis.Stop()
+			s.audit(r, true, "visual.stop")
 		}
-		if !readJSON(w, r, &body) {
-			s.audit(r, true, "visual.stop", "ok", false, "error", "bad request")
-			return
-		}
-		if body.Lease == "" {
-			s.audit(r, true, "visual.stop", "ok", false, "error", "lease required")
-			http.Error(w, "lease is required", http.StatusBadRequest)
-			return
-		}
-		stopped := s.vis != nil && s.vis.Stop(body.Lease)
-		s.audit(r, true, "visual.stop", "ok", stopped)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 

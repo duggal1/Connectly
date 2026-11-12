@@ -37,11 +37,12 @@ const INITIAL: TabsState = { tabs: [], pane: { kind: 'sessions' } };
 function remove(state: TabsState, drop: (tab: Tab) => boolean): TabsState {
   const tabs = state.tabs.filter((tab) => !drop(tab));
   if (tabs.length === state.tabs.length) return state;
-  if (state.pane.kind !== 'tab' || tabs.some((tab) => tab.key === state.pane.key)) {
+  const activeKey = state.pane.kind === 'tab' ? state.pane.key : null;
+  if (activeKey === null || tabs.some((tab) => tab.key === activeKey)) {
     return { tabs, pane: state.pane };
   }
 
-  const index = state.tabs.findIndex((tab) => tab.key === state.pane.key);
+  const index = state.tabs.findIndex((tab) => tab.key === activeKey);
   const remaining = (tab: Tab) => !drop(tab);
   const next = state.tabs.slice(index + 1).find(remaining) ?? state.tabs.slice(0, index).reverse().find(remaining);
   return { tabs, pane: next ? { kind: 'tab', key: next.key } : { kind: 'sessions' } };

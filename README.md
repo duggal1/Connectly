@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/public/logo.svg" alt="Connectly pixel logo" width="96" />
+  <img src="./app/public/logo.svg" alt="Connectly pixel logo" width="96" />
 </p>
 
 <h1 align="center">Connectly</h1>
@@ -22,7 +22,7 @@ flowchart LR
   Daemon --> PTY[Login shell and PTY sessions]
   Agent[Local MCP client] <-->|stdio| MCP[termd mcp]
   MCP <-->|HTTP over 0600 Unix socket| Daemon
-  Daemon -. leased VNC bridge .-> Screen[macOS Screen Sharing]
+  Daemon -. ticketed VNC bridge .-> Screen[macOS Screen Sharing]
 ```
 
 The Expo app uses React Native for its interface and xterm.js in a WebView for terminal rendering. The daemon owns PTYs, session state, authentication, and Mac APIs. A binary-framed WebSocket carries terminal input and output. HTTP carries stats and configured Mac actions.
@@ -101,7 +101,7 @@ To add the local MCP server to Claude Code, run `claude mcp add connectly -- /us
 
 Connectly is strongest as a direct, CLI-agnostic terminal with controlled Mac actions. Sessions live in daemon memory, so they survive phone disconnects but not daemon restarts. Detached sessions are removed after 24 hours by default. The app reconnects in the foreground, but does not keep a reliable background connection alive.
 
-The terminal renderer and noVNC load pinned packages from jsDelivr, so the phone needs internet access to load them. Screen viewing depends on macOS Screen Sharing and account authentication. It is view-and-tap only, without a remote keyboard. A lease expires after five minutes by default; if Screen Sharing was already on, Connectly leaves it on.
+The terminal renderer and noVNC load pinned packages from jsDelivr, so the phone needs internet access to load them. Screen viewing depends on macOS Screen Sharing and account authentication. It is view-and-tap only, without a remote keyboard. Screen Sharing stops when you leave the screen or after five minutes by default; if it was already on, Connectly leaves it on.
 
 Lid-closed operation depends on macOS power behavior and the `sudoers` rule from `install.sh`. Test it on the target Mac before relying on it. Do not expose the daemon to the public internet. Use Tailscale or configure TLS and a private firewall.
 

@@ -15,9 +15,9 @@ export interface Palette {
 
 const dark: Palette = {
   mode: 'dark',
-  bg: '#000000', surface: '#0A0A0A', well: '#050505',
-  control: '#1A1A1A', controlHover: '#222222', controlPressed: '#2A2A2A',
-  field: '#0F0F0F', fieldHover: '#151515',
+  bg: '#000000', surface: '#121212', well: '#0A0A0A',
+  control: '#202020', controlHover: '#181818', controlPressed: '#181818',
+  field: '#101010', fieldHover: '#0C0C0C',
   text: '#FAFAFA', text2: '#A3A3A3',
   accent: '#2563EB', accentHover: '#3B82F6', accentPressed: '#1D4ED8',
   accentText: '#60A5FA', accentSoft: 'rgba(37,99,235,0.17)', onAccent: '#FAFAFA',

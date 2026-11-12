@@ -30,30 +30,25 @@ var vncUp = websocket.Upgrader{
 	CheckOrigin:     func(*http.Request) bool { return true },
 }
 
+// Visual is one global, temporary Screen Sharing session. It only unloads
+// Screen Sharing when Connectly enabled it; a service already running is left on.
 type Visual struct {
 	ttl time.Duration
 
 	mu      sync.Mutex
 	on      bool
 	owned   bool
+	until   time.Time
 	timer   *time.Timer
-	leases  map[string]time.Time
-	tickets map[string]visualTicket
-	conns   map[net.Conn]string
-}
-
-type visualTicket struct {
-	lease   string
-	expires time.Time
+	tickets map[string]time.Time
+	conns   map[net.Conn]struct{}
 }
 
 func newVisual(ttl time.Duration) *Visual {
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
-	return &Visual{
-		ttl: ttl, leases: map[string]time.Time{}, tickets: map[string]visualTicket{}, conns: map[net.Conn]string{},
-	}
+	return &Visual{ttl: ttl, tickets: map[string]time.Time{}, conns: map[net.Conn]struct{}{}}
 }
 
 func listening() bool {
@@ -76,152 +71,84 @@ func screenSharing(verb string) error {
 }
 
 func randomTicket() (string, error) {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(bytes), nil
+	return hex.EncodeToString(value), nil
 }
 
-func (v *Visual) Start(existingLease string) (ticket, lease string, ttl time.Duration, err error) {
+// Start enables Screen Sharing if needed, rearms its auto-stop deadline, and
+// returns a single-use bridge ticket. Repeated starts extend the same session.
+func (v *Visual) Start() (ticket string, ttl time.Duration, err error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	now := time.Now()
-	v.expireLeasesLocked(now)
+
 	ticket, err = randomTicket()
 	if err != nil {
-		return "", "", 0, err
+		return "", 0, err
 	}
-	lease = existingLease
-	if expires, ok := v.leases[lease]; lease == "" || !ok || !now.Before(expires) {
-		lease, err = randomTicket()
-		if err != nil {
-			return "", "", 0, err
-		}
-	}
-
 	if !v.on {
 		if listening() {
 			v.owned = false
 		} else {
 			if err := screenSharing("load"); err != nil {
-				slog.Error("enable Screen Sharing", "err", err)
-				return "", "", 0, errors.New("Screen Sharing couldn't be turned on. Re-run install.sh")
+				slog.Error("screen sharing on", "err", err)
+				if strings.Contains(err.Error(), "sudo: a password is required") {
+					return "", 0, errors.New("Screen Sharing needs administrator setup. On the Mac, run ./daemon/install.sh --permissions-only")
+				}
+				return "", 0, fmt.Errorf("Screen Sharing couldn't be turned on: %w", err)
 			}
 			for attempt := 0; attempt < 15 && !listening(); attempt++ {
 				time.Sleep(200 * time.Millisecond)
 			}
 			if !listening() {
 				_ = screenSharing("unload")
-				return "", "", 0, errors.New("Screen Sharing didn't start listening")
+				return "", 0, errors.New("Screen Sharing didn't start listening")
 			}
 			v.owned = true
 		}
 		v.on = true
 	}
 
-	for currentTicket, grant := range v.tickets {
-		if grant.lease == lease {
-			delete(v.tickets, currentTicket)
+	now := time.Now()
+	for existing, expiry := range v.tickets {
+		if !now.Before(expiry) {
+			delete(v.tickets, existing)
 		}
 	}
-	v.leases[lease] = now.Add(v.ttl)
-	v.tickets[ticket] = visualTicket{lease: lease, expires: now.Add(ticketLife)}
-	v.scheduleExpiryLocked()
-	slog.Info("visual on", "leaseCount", len(v.leases), "owned", v.owned)
-	return ticket, lease, v.ttl, nil
+	v.until = now.Add(v.ttl)
+	if v.timer != nil {
+		v.timer.Stop()
+	}
+	v.timer = time.AfterFunc(v.ttl, v.expire)
+	v.tickets[ticket] = now.Add(ticketLife)
+	slog.Info("visual on", "until", v.until.Format(time.RFC3339), "owned", v.owned)
+	return ticket, v.ttl, nil
 }
 
-func (v *Visual) Stop(lease string) bool {
+func (v *Visual) Stop() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if _, ok := v.leases[lease]; !ok || lease == "" {
-		return false
-	}
-	delete(v.leases, lease)
-	v.closeLeaseLocked(lease)
-	for ticket, grant := range v.tickets {
-		if grant.lease == lease {
-			delete(v.tickets, ticket)
-		}
-	}
-	if len(v.leases) == 0 {
-		v.stopLocked()
-	} else {
-		v.scheduleExpiryLocked()
-	}
-	return true
+	v.stopLocked()
 }
 
 func (v *Visual) Shutdown() {
 	if v != nil {
-		v.mu.Lock()
-		v.stopLocked()
-		v.mu.Unlock()
+		v.Stop()
 	}
 }
 
 func (v *Visual) expire() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.expireLeasesLocked(time.Now())
-	v.scheduleExpiryLocked()
-}
-
-func (v *Visual) expireLeasesLocked(now time.Time) {
-	for lease, expiry := range v.leases {
-		if !now.Before(expiry) {
-			delete(v.leases, lease)
-			v.closeLeaseLocked(lease)
-			for ticket, grant := range v.tickets {
-				if grant.lease == lease {
-					delete(v.tickets, ticket)
-				}
-			}
-		}
-	}
-	for ticket, grant := range v.tickets {
-		if !now.Before(grant.expires) {
-			delete(v.tickets, ticket)
-		}
-	}
-	if v.on && len(v.leases) == 0 {
+	if v.on && !time.Now().Before(v.until) {
 		v.stopLocked()
 	}
 }
 
-func (v *Visual) scheduleExpiryLocked() {
-	if v.timer != nil {
-		v.timer.Stop()
-		v.timer = nil
-	}
-	if !v.on || len(v.leases) == 0 {
-		return
-	}
-	var earliest time.Time
-	for _, expiry := range v.leases {
-		if earliest.IsZero() || expiry.Before(earliest) {
-			earliest = expiry
-		}
-	}
-	delay := time.Until(earliest)
-	if delay < 0 {
-		delay = 0
-	}
-	v.timer = time.AfterFunc(delay, v.expire)
-}
-
-func (v *Visual) closeLeaseLocked(lease string) {
-	for conn, owner := range v.conns {
-		if owner == lease {
-			_ = conn.Close()
-			delete(v.conns, conn)
-		}
-	}
-}
-
 func (v *Visual) stopLocked() {
-	if !v.on && len(v.leases) == 0 {
+	if !v.on {
 		return
 	}
 	v.on = false
@@ -232,57 +159,41 @@ func (v *Visual) stopLocked() {
 	for conn := range v.conns {
 		_ = conn.Close()
 	}
-	v.conns = map[net.Conn]string{}
-	v.tickets = map[string]visualTicket{}
-	v.leases = map[string]time.Time{}
+	v.conns = map[net.Conn]struct{}{}
+	v.tickets = map[string]time.Time{}
 	if v.owned {
 		if err := screenSharing("unload"); err != nil {
-			slog.Warn("Screen Sharing may still be on; run sudo launchctl unload -w "+ssPlist, "err", err)
+			slog.Warn("Screen Sharing may still be on. Run: sudo launchctl unload -w "+ssPlist, "err", err)
 		}
 	}
 	v.owned = false
 	slog.Info("visual off")
 }
 
-func (v *Visual) Status() (bool, time.Duration) {
+func (v *Visual) Status() (active bool, remaining time.Duration) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if !v.on || len(v.leases) == 0 {
+	if !v.on {
 		return false, 0
 	}
-	var latest time.Time
-	for _, expiry := range v.leases {
-		if expiry.After(latest) {
-			latest = expiry
-		}
-	}
-	remaining := time.Until(latest)
-	if remaining < 0 {
-		remaining = 0
-	}
-	return true, remaining
+	return true, time.Until(v.until)
 }
 
-func (v *Visual) redeem(ticket string) (string, bool) {
+func (v *Visual) redeem(ticket string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	grant, ok := v.tickets[ticket]
+	expires, ok := v.tickets[ticket]
 	delete(v.tickets, ticket)
-	leaseExpiry, leaseOK := v.leases[grant.lease]
-	valid := ok && leaseOK && v.on && time.Now().Before(grant.expires) && time.Now().Before(leaseExpiry)
-	return grant.lease, valid
+	return ok && v.on && time.Now().Before(expires)
 }
 
-func (v *Visual) track(conn net.Conn, lease string) bool {
+func (v *Visual) track(conn net.Conn) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if !v.on {
 		return false
 	}
-	if expiry, ok := v.leases[lease]; !ok || !time.Now().Before(expiry) {
-		return false
-	}
-	v.conns[conn] = lease
+	v.conns[conn] = struct{}{}
 	return true
 }
 
@@ -293,8 +204,7 @@ func (v *Visual) untrack(conn net.Conn) {
 }
 
 func (v *Visual) bridge(w http.ResponseWriter, r *http.Request) {
-	lease, valid := v.redeem(r.URL.Query().Get("ticket"))
-	if !valid {
+	if !v.redeem(r.URL.Query().Get("ticket")) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -307,7 +217,7 @@ func (v *Visual) bridge(w http.ResponseWriter, r *http.Request) {
 		_ = ws.Close()
 		return
 	}
-	if !v.track(tcp, lease) {
+	if !v.track(tcp) {
 		_ = tcp.Close()
 		_ = ws.Close()
 		return

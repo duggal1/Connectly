@@ -16,6 +16,7 @@ export function Button({
   height = H.button,
   disabled,
   loading = false,
+  surface = 'control',
   style,
 }: {
   label: string;
@@ -24,6 +25,7 @@ export function Button({
   height?: number;
   disabled?: boolean;
   loading?: boolean;
+  surface?: 'control' | 'field';
   style?: StyleProp<ViewStyle>;
 }) {
   const t = useTok();
@@ -32,8 +34,8 @@ export function Button({
   const eff: Kind = kind === 'primary' && disabled && !loading ? 'secondary' : kind;
   const bg =
     eff === 'primary' ? (pressed ? t.accentPressed : t.accent)
-    : eff === 'secondary' ? (pressed ? t.controlPressed : t.control)
-    : pressed ? t.wash : 'transparent';
+    : eff === 'secondary' ? (pressed ? t[surface === 'field' ? 'fieldHover' : 'controlPressed'] : t[surface])
+    : pressed ? t.controlHover : 'transparent';
   const fg =
     eff === 'primary' ? t.onAccent
     : eff === 'secondary' ? (disabled ? t.text2 : t.text)
@@ -123,9 +125,9 @@ export function IconButton({
     >
       <View
         style={{
-          width: 36, height: 36, borderRadius: 18,
+          width: 36, height: 36, borderRadius: 14, overflow: 'hidden',
           alignItems: 'center', justifyContent: 'center',
-          backgroundColor: pressed ? t.wash : 'transparent',
+          backgroundColor: pressed ? t.controlHover : 'transparent',
         }}
       >
         <PixelMark name={icon} cell={2} colors={{ '#': color }} />

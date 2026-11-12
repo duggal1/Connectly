@@ -7,20 +7,36 @@ ME="$(id -un)"
 LABEL="dev.connectly.termd"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
+install_permissions() {
+  SUDOERS_TMP="$(mktemp)"
+  trap 'rm -f "$SUDOERS_TMP"' EXIT
+  SS_PLIST="/System/Library/LaunchDaemons/com.apple.screensharing.plist"
+  cat > "$SUDOERS_TMP" <<SUDO
+$ME ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1, /bin/launchctl load -w $SS_PLIST, /bin/launchctl unload -w $SS_PLIST
+SUDO
+  sudo visudo -cf "$SUDOERS_TMP"
+  sudo install -m 440 -o root -g wheel "$SUDOERS_TMP" /etc/sudoers.d/connectly-pmset
+  sudo -n -l /bin/launchctl load -w "$SS_PLIST" >/dev/null
+  sudo -n -l /bin/launchctl unload -w "$SS_PLIST" >/dev/null
+}
+
+if [[ "${1:-}" == "--permissions-only" ]]; then
+  if [[ $# -ne 1 ]]; then
+    printf 'Usage: %s --permissions-only\n' "$0" >&2
+    exit 2
+  fi
+  install_permissions
+  printf 'Screen Sharing and sleep-control permissions installed. You can retry Screen Sharing.\n'
+  exit 0
+fi
+
 cd "$(dirname "$0")"
 go mod tidy
 go build -o termd .
 sudo mkdir -p /usr/local/bin
 sudo install -m 755 termd /usr/local/bin/termd
 
-SUDOERS_TMP="$(mktemp)"
-trap 'rm -f "$SUDOERS_TMP"' EXIT
-SS_PLIST="/System/Library/LaunchDaemons/com.apple.screensharing.plist"
-cat > "$SUDOERS_TMP" <<SUDO
-$ME ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1, /bin/launchctl load -w $SS_PLIST, /bin/launchctl unload -w $SS_PLIST
-SUDO
-sudo visudo -cf "$SUDOERS_TMP"
-sudo install -m 440 -o root -g wheel "$SUDOERS_TMP" /etc/sudoers.d/connectly-pmset
+install_permissions
 
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 cat > "$PLIST" <<EOF

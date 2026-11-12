@@ -78,12 +78,12 @@ type Actions struct {
 	byID      map[string]Action
 	order     []string
 
-	mu   sync.Mutex
-	busy map[string]bool
+	mu      sync.Mutex
+	running bool
 }
 
 func newActions(shell string) *Actions {
-	return &Actions{shell: shell, byID: map[string]Action{}, busy: map[string]bool{}}
+	return &Actions{shell: shell, byID: map[string]Action{}}
 }
 
 func expandHome(path string) string {
@@ -213,19 +213,19 @@ func (a *Actions) Capabilities() Capabilities {
 	return caps
 }
 
-func (a *Actions) acquire(id string) bool {
+func (a *Actions) acquire() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.busy[id] {
+	if a.running {
 		return false
 	}
-	a.busy[id] = true
+	a.running = true
 	return true
 }
 
-func (a *Actions) release(id string) {
+func (a *Actions) release() {
 	a.mu.Lock()
-	delete(a.busy, id)
+	a.running = false
 	a.mu.Unlock()
 }
 
@@ -234,10 +234,10 @@ func (a *Actions) Run(id string) (Result, error) {
 	if !ok {
 		return Result{}, errNoAction
 	}
-	if !a.acquire(id) {
+	if !a.acquire() {
 		return Result{}, errBusy
 	}
-	defer a.release(id)
+	defer a.release()
 
 	timeout := time.Duration(action.Timeout) * time.Second
 	switch action.Kind {

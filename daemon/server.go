@@ -136,13 +136,23 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	sessions := s.mgr.list()
-	slog.Info("sessions listed", "request_id", r.Header.Get("X-Request-ID"), "remote_ip", clientIP(r), "count", len(sessions))
+	caller := clientIP(r)
+	if isLocalRequest(r) {
+		caller = "local"
+	}
+	slog.Info("sessions listed", "request_id", r.Header.Get("X-Request-ID"), "remote_ip", caller, "count", len(sessions))
+	s.audit(r, !isLocalRequest(r), "sessions.list", "count", len(sessions))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(sessions)
 }
 
 func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Mac stats requested", "request_id", r.Header.Get("X-Request-ID"), "remote_ip", clientIP(r))
+	caller := clientIP(r)
+	if isLocalRequest(r) {
+		caller = "local"
+	}
+	slog.Info("Mac stats requested", "request_id", r.Header.Get("X-Request-ID"), "remote_ip", caller)
+	s.audit(r, !isLocalRequest(r), "stats.read")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.stats.Get())
 }

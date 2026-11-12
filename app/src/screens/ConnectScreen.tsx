@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { HostConfig, saveHost } from '../lib/storage';
 import { Button } from '../ui/Button';
 import { Field } from '../ui/Field';
+import { Logo } from '../ui/Logo';
 import { Notice } from '../ui/Notice';
 
 import { PixelMark } from '../ui/Pixel';
@@ -61,7 +62,7 @@ export function ConnectScreen({
         contentContainerStyle={{ padding: 24, paddingBottom: 24 + insets.bottom, gap: 24 }}
       >
         <View style={{ alignItems: 'center', paddingTop: 8 }}>
-          <PixelMark name="logo" cell={3} colors={{ '#': '#1D4ED8' }} />
+          <Logo size={48} />
         </View>
 
         <View style={{ gap: 8, paddingTop: 16 }}>

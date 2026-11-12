@@ -1,14 +1,44 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BackHandler, StyleSheet, View } from 'react-native';
+import { Animated, BackHandler, Easing, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { HostConfig } from '../lib/storage';
 import { newKey, useTabs } from '../lib/tabs';
 import { TerminalScreen } from '../terminal/TerminalScreen';
 import { useTok } from '../theme/tokens';
 import { TabBar } from '../ui/TabBar';
+import { Fade } from '../ui/Fade';
+import { useReduceMotion } from '../ui/hooks';
 import { MacScreen } from './MacScreen';
 import { SessionsScreen } from './SessionsScreen';
 import { VisualScreen } from './VisualScreen';
+
+function TerminalLayer({ active, children }: { active: boolean; children: React.ReactNode }) {
+  const reduceMotion = useReduceMotion();
+  const opacity = React.useRef(new Animated.Value(active ? 1 : 0)).current;
+  const visibleOpacity = reduceMotion ? (active ? 1 : 0) : opacity;
+
+  useEffect(() => {
+    if (reduceMotion) {
+      opacity.setValue(active ? 1 : 0);
+      return;
+    }
+    Animated.timing(opacity, {
+      toValue: active ? 1 : 0,
+      duration: 180,
+      easing: Easing.bezier(0.23, 1, 0.32, 1),
+      useNativeDriver: true,
+    }).start();
+  }, [active, opacity, reduceMotion]);
+
+  return (
+    <Animated.View
+      pointerEvents={active ? 'auto' : 'none'}
+      style={[StyleSheet.absoluteFill, { opacity: visibleOpacity, zIndex: active ? 1 : 0 }]}
+    >
+      {children}
+    </Animated.View>
+  );
+}
 
 export function Workspace({ cfg, onHost }: { cfg: HostConfig; onHost: () => void }) {
   const theme = useTok();
@@ -53,7 +83,7 @@ export function Workspace({ cfg, onHost }: { cfg: HostConfig; onHost: () => void
       <TabBar
         items={tabs.map((tab) => ({
           key: tab.key,
-          label: titles[tab.key] || (tab.session ? `Term ${tab.session.slice(0, 4)}` : 'New'),
+          label: titles[tab.key] || (tab.session ? 'Terminal' : 'New'),
         }))}
         pane={pane}
         onShow={(nextPane) => dispatch({ type: 'show', pane: nextPane })}
@@ -65,11 +95,7 @@ export function Workspace({ cfg, onHost }: { cfg: HostConfig; onHost: () => void
         {tabs.map((tab) => {
           const active = pane.kind === 'tab' && pane.key === tab.key;
           return (
-            <View
-              key={tab.key}
-              pointerEvents={active ? 'auto' : 'none'}
-              style={[StyleSheet.absoluteFill, { opacity: active ? 1 : 0, zIndex: active ? 1 : 0 }]}
-            >
+            <TerminalLayer key={tab.key} active={active}>
               <TerminalScreen
                 cfg={cfg}
                 session={tab.session}
@@ -80,31 +106,37 @@ export function Workspace({ cfg, onHost }: { cfg: HostConfig; onHost: () => void
                   : { ...previous, [tab.key]: title })}
                 onRestart={() => dispatch({ type: 'restart', key: tab.key, next: newKey() })}
               />
-            </View>
+            </TerminalLayer>
           );
         })}
 
         {pane.kind === 'sessions' ? (
           <View style={cover}>
-            <SessionsScreen
-              cfg={cfg}
-              onOpen={open}
-              onNew={() => open()}
-              onHost={onHost}
-              onEnded={(session) => dispatch({ type: 'closeSession', session })}
-            />
+            <Fade k="sessions">
+              <SessionsScreen
+                cfg={cfg}
+                onOpen={open}
+                onNew={() => open()}
+                onHost={onHost}
+                onEnded={(session) => dispatch({ type: 'closeSession', session })}
+              />
+            </Fade>
           </View>
         ) : null}
 
         {pane.kind === 'mac' ? (
           <View style={cover}>
-            <MacScreen cfg={cfg} onScreen={() => dispatch({ type: 'show', pane: { kind: 'screen' } })} />
+            <Fade k="mac">
+              <MacScreen cfg={cfg} onScreen={() => dispatch({ type: 'show', pane: { kind: 'screen' } })} />
+            </Fade>
           </View>
         ) : null}
 
         {pane.kind === 'screen' ? (
           <View style={cover}>
-            <VisualScreen cfg={cfg} onClose={() => dispatch({ type: 'show', pane: { kind: 'mac' } })} />
+            <Fade k="screen">
+              <VisualScreen cfg={cfg} onClose={() => dispatch({ type: 'show', pane: { kind: 'mac' } })} />
+            </Fade>
           </View>
         ) : null}
       </View>

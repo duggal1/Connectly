@@ -9,15 +9,14 @@ import { H, tabular, useTok } from '../theme/tokens';
 import { Button } from '../ui/Button';
 import { MacStats } from '../ui/MacStats';
 import { Notice } from '../ui/Notice';
-import { PageTitle } from '../ui/PageTitle';
-import { PixelMark } from '../ui/Pixel';
 import { Txt } from '../ui/Txt';
+import { WaitCells } from '../ui/WaitCells';
 
-const KIND: Record<ActionInfo['kind'], string> = {
-  app: 'Opens an app',
-  path: 'Opens a file or folder',
-  shortcut: 'Runs a Shortcut',
-  script: 'Runs a configured script',
+const ACTION_KIND: Record<ActionInfo['kind'], string> = {
+  app: 'App',
+  path: 'File or folder',
+  shortcut: 'Shortcut',
+  script: 'Script',
 };
 
 function errorMessage(error: unknown): string {
@@ -37,29 +36,37 @@ function ActionRow({
   action,
   result,
   busy,
+  disabled,
   onRun,
 }: {
   action: ActionInfo;
   result?: ActionResult;
   busy: boolean;
+  disabled: boolean;
   onRun: () => void;
 }) {
-  const failed = result !== undefined && !result.ok;
   return (
-    <View style={{ minHeight: H.row, paddingLeft: 16, paddingRight: 8, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Txt kind="label">{action.label}</Txt>
-        {result ? (
-          <Txt kind="caption" tone={failed ? 'statusBad' : 'text2'} numberOfLines={3} style={tabular}>
-            {failed
-              ? `Failed (${result.code})${result.output ? `. ${result.output}` : '.'}`
-              : `Done in ${result.ms} ms.${result.output ? ` ${result.output}` : ''}`}
-          </Txt>
+    <View style={{ minHeight: H.row, paddingHorizontal: 16, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Txt kind="label" numberOfLines={1}>{action.label}</Txt>
+        {busy ? (
+          <View style={{ height: 16, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <WaitCells />
+            <Txt kind="caption" tone="text2">Running {ACTION_KIND[action.kind].toLowerCase()}</Txt>
+          </View>
+        ) : result ? (
+          <View style={{ minHeight: 16, flexDirection: 'row', alignItems: 'center' }}>
+            <Txt kind="caption" tone={result.ok ? 'text2' : 'statusBad'} numberOfLines={2} style={tabular}>
+              {result.ok
+                ? `Done in ${result.ms} ms${result.output ? `. ${result.output}` : '.'}`
+                : `Failed (${result.code})${result.output ? `. ${result.output}` : '.'}`}
+            </Txt>
+          </View>
         ) : (
-          <Txt kind="caption" tone="text2">{KIND[action.kind]}</Txt>
+          <Txt kind="caption" tone="text2">{ACTION_KIND[action.kind]}</Txt>
         )}
       </View>
-      <Button label={busy ? 'Running' : 'Run'} height={H.small} disabled={busy} onPress={onRun} />
+      <Button label="Run" height={H.button} disabled={disabled} onPress={onRun} />
     </View>
   );
 }
@@ -71,17 +78,13 @@ export function MacScreen({ cfg, onScreen }: { cfg: HostConfig; onScreen: () => 
   const [stats, setStats] = useState<MacStatsData | null>(null);
   const [statsAt, setStatsAt] = useState(0);
   const [error, setError] = useState('');
+  const [operationError, setOperationError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, ActionResult>>({});
-  const [note, setNote] = useState('');
+  const [clipboardResult, setClipboardResult] = useState('');
+  const [volumeResult, setVolumeResult] = useState('');
   const busyRef = useRef(false);
-  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const flash = (message: string) => {
-    setNote(message);
-    if (noteTimer.current) clearTimeout(noteTimer.current);
-    noteTimer.current = setTimeout(() => setNote(''), 3500);
-  };
+  const retryRef = useRef<(() => Promise<void>) | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -101,24 +104,28 @@ export function MacScreen({ cfg, onScreen }: { cfg: HostConfig; onScreen: () => 
   useEffect(() => {
     void load();
     const interval = setInterval(() => void load(), 10000);
-    return () => {
-      clearInterval(interval);
-      if (noteTimer.current) clearTimeout(noteTimer.current);
-    };
+    return () => clearInterval(interval);
   }, [load]);
 
-  const guard = async (id: string, operation: () => Promise<void>) => {
+  const guard = async (id: string, operation: () => Promise<void>, remember = true) => {
     if (busyRef.current) return;
+    if (remember) retryRef.current = operation;
     busyRef.current = true;
     setBusy(id);
+    setOperationError('');
     try {
       await operation();
     } catch (cause: unknown) {
-      flash(errorMessage(cause));
+      setOperationError(errorMessage(cause));
     } finally {
       busyRef.current = false;
       setBusy(null);
     }
+  };
+
+  const retryOperation = () => {
+    const operation = retryRef.current;
+    if (operation) void guard('retry', operation, false);
   };
 
   const run = (action: ActionInfo) => guard(action.id, async () => {
@@ -131,28 +138,32 @@ export function MacScreen({ cfg, onScreen }: { cfg: HostConfig; onScreen: () => 
     setResults((previous) => ({ ...previous, [action.id]: result }));
   });
 
-  const toMac = () => guard('clip', async () => {
+  const sendToMac = () => guard('clipboard', async () => {
+    setClipboardResult('');
     const text = await Clipboard.getStringAsync();
     if (!text) {
-      flash('The phone clipboard is empty.');
+      setClipboardResult('The phone clipboard is empty.');
       return;
     }
     await api<void>(cfg, '/api/clipboard', json('PUT', { text }));
-    flash('Sent to the Mac clipboard.');
+    setClipboardResult('Sent to the Mac clipboard.');
   });
 
-  const fromMac = () => guard('clip', async () => {
+  const copyFromMac = () => guard('clipboard', async () => {
+    setClipboardResult('');
     const result = await api<{ text: string }>(cfg, '/api/clipboard');
     if (!result.text) {
-      flash('The Mac clipboard is empty.');
+      setClipboardResult('The Mac clipboard is empty.');
       return;
     }
     await Clipboard.setStringAsync(result.text);
-    flash('Copied from the Mac.');
+    setClipboardResult('Copied from the Mac.');
   });
 
   const setVolume = (level: number) => guard('volume', async () => {
+    setVolumeResult('');
     await api<void>(cfg, '/api/volume', json('PUT', { level }));
+    setVolumeResult(level === 0 ? 'Volume muted.' : `Volume set to ${level}%.`);
   });
 
   const nothingEnabled = capabilities !== null
@@ -163,20 +174,39 @@ export function MacScreen({ cfg, onScreen }: { cfg: HostConfig; onScreen: () => 
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <ScrollView contentContainerStyle={{ paddingTop: 16, paddingBottom: 24 + insets.bottom, gap: 24 }}>
-        <View style={{ paddingHorizontal: 24, gap: 4 }}>
-          <PageTitle>Mac</PageTitle>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          flexGrow: 1,
+          paddingTop: 8,
+          paddingBottom: 16 + insets.bottom,
+          gap: 20,
+        }}
+      >
+        <View style={{ paddingHorizontal: 16, gap: 4 }}>
+          <Txt kind="display">Mac</Txt>
           <Txt kind="caption" tone="text2">{cfg.host}</Txt>
         </View>
 
         <MacStats data={stats} rx={statsAt} live={!error} />
 
         {error ? (
-          <Notice lead={<PixelMark name="failed" cell={2} colors={{ '#': theme.statusBad }} />} text={error}>
-            <Button label="Retry" kind="primary" height={H.small} onPress={() => void load()} />
+          <Notice text={error}>
+            <Button label="Retry" kind="secondary" height={H.small} style={{ paddingHorizontal: 16 }} onPress={() => void load()} />
           </Notice>
         ) : null}
-        {note ? <Notice text={note} /> : null}
+        {operationError ? (
+          <Notice text={operationError}>
+            <Button label="Retry" kind="secondary" height={H.small} style={{ paddingHorizontal: 16 }} onPress={retryOperation} />
+          </Notice>
+        ) : null}
+
+        {capabilities === null && !error ? (
+          <View style={{ height: H.row, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <WaitCells />
+            <Txt kind="caption" tone="text2">Reading Mac controls</Txt>
+          </View>
+        ) : null}
 
         {capabilities && capabilities.actions.length > 0 ? (
           <Section title="Actions">
@@ -185,7 +215,8 @@ export function MacScreen({ cfg, onScreen }: { cfg: HostConfig; onScreen: () => 
                 key={action.id}
                 action={action}
                 result={results[action.id]}
-                busy={busy !== null}
+                busy={busy === action.id}
+                disabled={busy !== null}
                 onRun={() => void run(action)}
               />
             ))}
@@ -194,44 +225,47 @@ export function MacScreen({ cfg, onScreen }: { cfg: HostConfig; onScreen: () => 
 
         {capabilities?.clipboard ? (
           <Section title="Clipboard">
-            <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16 }}>
-              <Button label="Send to Mac" height={H.small} disabled={busy !== null} onPress={() => void toMac()} />
-              <Button label="Copy from Mac" height={H.small} disabled={busy !== null} onPress={() => void fromMac()} />
+            <View style={{ paddingHorizontal: 16, flexDirection: 'row', gap: 8 }}>
+              <Button label="Send to Mac" height={H.button} disabled={busy !== null} onPress={() => void sendToMac()} />
+              <Button label="Copy from Mac" height={H.button} disabled={busy !== null} onPress={() => void copyFromMac()} />
             </View>
+            {clipboardResult ? <Txt kind="caption" tone="text2" style={{ paddingHorizontal: 16 }}>{clipboardResult}</Txt> : null}
           </Section>
         ) : null}
 
         {capabilities?.volume ? (
           <Section title="Volume">
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16 }}>
+            <View style={{ paddingHorizontal: 16, flexDirection: 'row', gap: 8 }}>
               {[0, 25, 50, 75, 100].map((level) => (
                 <Button
                   key={level}
                   label={level === 0 ? 'Mute' : String(level)}
-                  height={H.small}
+                  height={H.button}
                   disabled={busy !== null}
                   onPress={() => void setVolume(level)}
+                  style={{ width: 48, paddingHorizontal: 0 }}
                 />
               ))}
             </View>
+            {volumeResult ? <Txt kind="caption" tone="text2" style={{ paddingHorizontal: 16 }}>{volumeResult}</Txt> : null}
           </Section>
         ) : null}
 
         {capabilities?.visual ? (
-          <Section title="Screen">
-            <View style={{ minHeight: H.row, paddingLeft: 16, paddingRight: 8, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <Section title="Mac desktop">
+            <View style={{ minHeight: H.row, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <Txt kind="caption" tone="text2" style={{ flex: 1 }}>
-                Starts Screen Sharing on demand and stops it automatically.
+                View and tap the Mac desktop.
               </Txt>
-              <Button label="Open" height={H.small} disabled={busy !== null} onPress={onScreen} />
+              <Button label="View desktop" kind="secondary" height={H.small} surface="field" disabled={busy !== null} style={{ paddingHorizontal: 16 }} onPress={onScreen} />
             </View>
           </Section>
         ) : null}
 
         {nothingEnabled ? (
-          <Txt kind="caption" tone="text2" style={{ paddingHorizontal: 24 }}>
-            Nothing is enabled. Add allow-listed controls in ~/.config/connectly-termd/actions.json on the Mac.
-          </Txt>
+          <View style={{ paddingHorizontal: 24 }}>
+            <Txt kind="body" tone="text2">No phone controls are enabled. Add allow-listed controls in actions.json on the Mac.</Txt>
+          </View>
         ) : null}
       </ScrollView>
     </View>

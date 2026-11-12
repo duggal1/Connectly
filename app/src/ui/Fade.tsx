@@ -10,5 +10,5 @@ export function Fade({ k, children }: { k: string; children: ReactNode }) {
     o.setValue(reduce ? 1 : 0);
     if (!reduce) Animated.timing(o, { toValue: 1, duration: 180, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
   }, [k, reduce, o]);
-  return <Animated.View style={{ flex: 1, opacity: o }}>{children}</Animated.View>;
+  return <Animated.View style={{ flex: 1, opacity: reduce ? 1 : o }}>{children}</Animated.View>;
 }

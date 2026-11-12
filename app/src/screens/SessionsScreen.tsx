@@ -41,8 +41,8 @@ import { H, tabular, useTok } from '../theme/tokens';
 const LINE = '#1F1F1F';
 const CELL = 12;
 const GAP = 2;
-const CELL_OFF = '#1A1A1A'; // --control
-const THUMB = '#262626'; // one step above --control
+const CELL_OFF = '#202020'; // --control
+const THUMB = '#2C2C2C'; // one step above --control
 const BLUE = '#60A5FA'; // --okay
 const ORANGE = '#FB923C';
 const EASE = Easing.bezier(0.23, 1, 0.32, 1);
@@ -241,6 +241,7 @@ function Segmented({
             height: 28,
             padding: 2,
             borderRadius: 14,
+            overflow: 'hidden',
             backgroundColor: CELL_OFF,
             flexDirection: 'row',
           }}
@@ -331,10 +332,11 @@ function Row({
       style={{
         paddingHorizontal: 0,
         paddingVertical: 16,
+        borderRadius: 12,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 16,
-        backgroundColor: pressed ? t.control : 'transparent',
+        backgroundColor: pressed ? t.controlHover : 'transparent',
         borderBottomWidth: 1,
         borderBottomColor: LINE,
       }}
@@ -357,7 +359,15 @@ function Row({
         accessibilityRole="button"
         accessibilityLabel={armed ? 'Confirm end session' : 'End session'}
         hitSlop={6}
-        style={{ height: 32, minWidth: 48, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' }}
+        style={({ pressed }) => ({
+          height: 32,
+          minWidth: 48,
+          paddingHorizontal: 8,
+          borderRadius: 16,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: pressed ? t.controlPressed : 'transparent',
+        })}
       >
         <Txt kind="caption" tone={armed ? 'statusBad' : 'text2'} style={{ fontWeight: '500', letterSpacing: 0.2 }}>
           {armed ? 'END?' : 'END'}
@@ -376,7 +386,7 @@ function NewSessionButton({ onPress }: { onPress: () => void }) {
       style={({ pressed }) => ({
         height: 40,
         paddingHorizontal: 20,
-        borderRadius: 12,
+        borderRadius: 20,
         borderWidth: 1,
         borderColor: '#638DFF',
         flexDirection: 'row',
@@ -394,9 +404,9 @@ function NewSessionButton({ onPress }: { onPress: () => void }) {
         colors={['#001651', '#0040F0']}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
-        style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, borderRadius: 12 }}
+        style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, borderRadius: 20 }}
       />
-      <PixelMark name="plus" cell={2} gap={1} colors={{ '#': '#FFFFFF' }} />
+      <PixelMark name="plus" cell={2} colors={{ '#': '#FFFFFF' }} />
       <Txt kind="label" style={{ color: '#FFFFFF', fontSize: 14, lineHeight: 20, fontWeight: '500', letterSpacing: 0 }}>
         New session
       </Txt>
@@ -522,7 +532,7 @@ export function SessionsScreen({
             <Txt kind="caption" tone="text2">{cfg.host}</Txt>
           </View>
         </View>
-        <Button label="Host" kind="quiet" height={H.small} onPress={onHost} />
+        <Button label="Host" kind="secondary" height={H.small} style={{ paddingHorizontal: 16 }} onPress={onHost} />
       </View>
 
       <MacStats data={mac} rx={macRx} live={!error} />

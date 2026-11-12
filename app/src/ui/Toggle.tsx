@@ -22,7 +22,7 @@ export function Toggle({ value, onChange, label }: { value: boolean; onChange: (
       <Animated.View
         style={{
           width: 40, height: 24, borderRadius: 12,
-          backgroundColor: x.interpolate({ inputRange: [0, 1], outputRange: [t.controlPressed, t.accent] }),
+          backgroundColor: x.interpolate({ inputRange: [0, 1], outputRange: [t.control, t.accent] }),
         }}
       >
         <Animated.View

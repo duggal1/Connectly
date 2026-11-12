@@ -252,11 +252,18 @@ export function TerminalScreen({
         <Button label="New session" kind="primary" height={H.small} onPress={onRestart} />
       </Notice>
     ) : link === 'gone' ? (
-      <Notice text="This session ended on the Mac.">
-        <Button label="New session" kind="primary" height={H.small} onPress={onRestart} />
+      <Notice text="This session ended on the Mac." surface="well">
+        <Button
+          label="New session"
+          kind="secondary"
+          height={H.small}
+          surface="field"
+          style={{ paddingHorizontal: 8 }}
+          onPress={onRestart}
+        />
       </Notice>
     ) : link === 'connecting' ? (
-      <Notice lead={<WaitCells />} text="Connecting." />
+      <Notice lead={<WaitCells />} text="Connecting." surface="surface" />
     ) : link === 'reconnecting' && slow ? (
       <Notice lead={<WaitCells />} text="Reconnecting. Typing is held for 20 s, then dropped." />
     ) : null;
