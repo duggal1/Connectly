@@ -64,7 +64,7 @@ function RemoteRow({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
-        backgroundColor: pressed ? t.controlPressed : 'transparent',
+        backgroundColor: pressed ? t.bg : 'transparent',
       })}
     >
       <PixelMark name="dot" cell={2} colors={{ '#': statusColor }} />
@@ -92,7 +92,7 @@ function RemoteRow({
           borderRadius: 16,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: pressed ? t.controlPressed : 'transparent',
+          backgroundColor: pressed ? t.bg : 'transparent',
         })}
       >
         <Txt kind="body" tone="text2" style={{ fontSize: 18, lineHeight: 20 }}>⋯</Txt>
@@ -111,7 +111,7 @@ function OutsideRow({ agent, onStop }: { agent: LooseAgent; onStop: () => void }
         <Txt kind="caption" tone="text2" numberOfLines={1}>{compactPath(agent.cwd) || agent.tty}</Txt>
       </View>
       <Txt kind="caption" tone="text2" style={tabular}>{ago(new Date(agent.startedAt).toISOString())}</Txt>
-      <Button label="Stop" kind="quiet" height={H.small} onPress={onStop} />
+      <Button label="Stop" kind="secondary" surface="field" height={H.small} onPress={onStop} />
     </View>
   );
 }
@@ -253,7 +253,7 @@ export function RemoteSessionsPanel({
       ) : loading && snapshot === null ? (
         <View style={{ height: 56, justifyContent: 'center', paddingHorizontal: 12 }}><WaitCells /></View>
       ) : sessions.length ? (
-        <View style={{ gap: 2 }}>
+        <View style={{ gap: 2, padding: 4, borderRadius: R.card, overflow: 'hidden', backgroundColor: t.well }}>
           {sessions.map((session) => (
             <RemoteRow
               key={session.id}
@@ -273,7 +273,8 @@ export function RemoteSessionsPanel({
           {info?.hook ? (
             <Button
               label="Copy Mac hook"
-              kind="quiet"
+              kind="secondary"
+              surface="field"
               height={H.small}
               onPress={() => { void Clipboard.setStringAsync(info.hook); }}
             />
@@ -290,16 +291,18 @@ export function RemoteSessionsPanel({
           <Txt kind="caption" tone="text2" style={{ paddingHorizontal: 12, paddingBottom: 4 }}>
             Visible and stoppable. These terminals cannot be attached after they have started.
           </Txt>
-          {loose.map((agent) => (
-            <OutsideRow key={`${agent.pid}-${agent.startedAt}`} agent={agent} onStop={() => stopOutside(agent)} />
-          ))}
+          <View style={{ gap: 2, padding: 4, borderRadius: R.card, overflow: 'hidden', backgroundColor: t.well }}>
+            {loose.map((agent) => (
+              <OutsideRow key={`${agent.pid}-${agent.startedAt}`} agent={agent} onStop={() => stopOutside(agent)} />
+            ))}
+          </View>
         </View>
       ) : null}
 
       <Modal transparent visible={renameTarget !== null} animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={() => setRenameTarget(null)}>
         <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: t.scrim }}>
           <Pressable accessibilityLabel="Close rename session" onPress={() => setRenameTarget(null)} style={{ flex: 1 }} />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: R.card, borderTopRightRadius: R.card, padding: 20, gap: 16 }}>
+          <View style={{ backgroundColor: t.well, borderTopLeftRadius: R.card, borderTopRightRadius: R.card, padding: 20, gap: 16 }}>
             <Txt kind="title">Rename session</Txt>
             <View style={{ height: H.field, borderRadius: R.field, paddingHorizontal: 12, justifyContent: 'center', backgroundColor: t.field }}>
               <TextInput
@@ -316,7 +319,7 @@ export function RemoteSessionsPanel({
               />
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-              <Button label="Cancel" kind="quiet" height={H.small} onPress={() => setRenameTarget(null)} />
+              <Button label="Cancel" kind="secondary" surface="field" height={H.small} onPress={() => setRenameTarget(null)} />
               <Button label={renameBusy ? 'Saving' : 'Save'} kind="primary" height={H.small} disabled={!renameValue.trim() || renameBusy} onPress={() => void rename()} />
             </View>
           </View>
