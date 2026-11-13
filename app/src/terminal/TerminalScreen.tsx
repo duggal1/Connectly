@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -19,7 +19,7 @@ import { Txt } from '../ui/Txt';
 import { WaitCells } from '../ui/WaitCells';
 import { KeyBar } from './KeyBar';
 import { LinkStrip } from './LinkStrip';
-import { TERMINAL_HTML, xtermTheme } from './terminalHtml';
+import { buildTerminalHtml, xtermTheme } from './terminalHtml';
 
 const WORD: Record<LinkState, string> = {
   connecting: 'Connecting',
@@ -53,6 +53,8 @@ function ctrlByte(b: number): number {
 export function TerminalScreen({
   cfg,
   session,
+  remoteId,
+  remoteName,
   active,
   onBound,
   onTitle,
@@ -60,6 +62,8 @@ export function TerminalScreen({
 }: {
   cfg: HostConfig;
   session?: string;
+  remoteId?: string;
+  remoteName?: string;
   active: boolean;
   onBound: (id: string) => void;
   onTitle: (title: string) => void;
@@ -88,7 +92,10 @@ export function TerminalScreen({
   const [title, setTitle] = useState('');
   const [renderer, setRenderer] = useState<'loading' | 'ok' | 'failed'>('loading');
   const [rendererMsg, setRendererMsg] = useState('');
+  const [localScroll, setLocalScroll] = useState({ away: false, unread: false });
+  const [remoteScroll, setRemoteScroll] = useState({ inMode: false, newOutput: false });
   const slow = useDelayed(link === 'reconnecting', 1500);
+  const terminalHtml = React.useMemo(() => buildTerminalHtml(Boolean(remoteId)), [remoteId]);
 
   const js = useCallback((code: string) => web.current?.injectJavaScript(code + ';true;'), []);
 
@@ -120,7 +127,7 @@ export function TerminalScreen({
   }, [renderer, pushTheme]);
 
   const startConn = () => {
-    const connection = new TermConnection(cfg, { session, cols: size.current.cols, rows: size.current.rows }, {
+    const connection = new TermConnection(cfg, { session, remoteId, cols: size.current.cols, rows: size.current.rows }, {
       state: (state, stateDetail) => { setLink(state); setDetail(stateDetail ?? ''); },
       ready: (info) => {
         if (info.reset) {
@@ -128,7 +135,7 @@ export function TerminalScreen({
           js('window.__reset()');
         }
         setSid(info.session);
-        onBound(info.session);
+        if (!remoteId) onBound(info.session);
         setExitCode(null);
       },
       data: (bytes) => {
@@ -141,6 +148,10 @@ export function TerminalScreen({
       rtt: (ms) => setSamples((previous) => [...previous.slice(-23), ms]),
       exit: (code) => setExitCode(code),
       stats: (stats) => setMac({ s: stats, rx: Date.now() }),
+      scroll: (state) => {
+        setRemoteScroll({ inMode: state.inMode, newOutput: state.newOutput });
+        js(`window.__mode(${state.inMode},${state.newOutput})`);
+      },
     });
     conn.current = connection;
     connection.start();
@@ -219,6 +230,19 @@ export function TerminalScreen({
       case 'sel':
         if (typeof parsed.s === 'string' && parsed.s) Clipboard.setStringAsync(parsed.s);
         break;
+      case 'scrollState':
+        if (typeof parsed.away === 'boolean' && typeof parsed.unread === 'boolean') {
+          setLocalScroll({ away: parsed.away, unread: parsed.unread });
+        }
+        break;
+      case 'scroll':
+        if ((parsed.dir === 'up' || parsed.dir === 'down') && typeof parsed.lines === 'number') {
+          conn.current?.scroll(parsed.dir, parsed.lines);
+        }
+        break;
+      case 'scrollLive':
+        conn.current?.scrollToLive();
+        break;
       case 'fatal':
         setRenderer('failed');
         setRendererMsg(typeof parsed.m === 'string' ? parsed.m : 'Renderer error.');
@@ -233,7 +257,7 @@ export function TerminalScreen({
 
   const last = samples.length ? samples[samples.length - 1] : undefined;
   const speed = link !== 'live' ? '—' : echo != null ? `echo ${echo} ms` : last != null ? `${last} ms` : '—';
-  const heading = title || (sid ? `Session ${sid.slice(0, 4)}` : 'New session');
+  const heading = title || remoteName || (sid ? `Session ${sid.slice(0, 4)}` : 'New session');
   const lead =
     link === 'live' ? <PixelMark name="dot" cell={3} colors={{ '#': t.statusOK }} />
     : link === 'failed' ? <PixelMark name="failed" cell={2} colors={{ '#': t.statusBad }} />
@@ -247,6 +271,8 @@ export function TerminalScreen({
       <Notice lead={<PixelMark name="failed" cell={2} colors={{ '#': t.statusBad }} />} text={detail || 'Connection refused.'}>
         <Button label="Retry" kind="primary" height={H.small} onPress={() => conn.current?.retry()} />
       </Notice>
+    ) : link === 'exited' && remoteId ? (
+      <Notice text="This tmux session ended on the Mac." surface="well" />
     ) : link === 'exited' ? (
       <Notice text={`Process exited with code ${exitCode ?? 0}.`}>
         <Button label="New session" kind="primary" height={H.small} onPress={onRestart} />
@@ -288,7 +314,7 @@ export function TerminalScreen({
         <View style={{ flex: 1 }}>
           <WebView<object>
             ref={web}
-            source={{ html: TERMINAL_HTML }}
+            source={{ html: terminalHtml }}
             originWhitelist={['*']}
             onMessage={onMessage}
             javaScriptEnabled
@@ -304,6 +330,32 @@ export function TerminalScreen({
             onRenderProcessGone={() => web.current?.reload()}
             style={{ flex: 1, backgroundColor: t.bg }}
           />
+          {(remoteId ? remoteScroll.inMode : localScroll.away) ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={remoteId ? 'Jump to live output' : localScroll.unread ? 'Jump to new output' : 'Jump to bottom'}
+              onPress={() => {
+                if (remoteId) conn.current?.scrollToLive();
+                else js('window.__scrollBottom()');
+              }}
+              style={({ pressed }) => ({
+                position: 'absolute',
+                right: 12,
+                bottom: 8,
+                minHeight: 32,
+                paddingHorizontal: 12,
+                borderRadius: 16,
+                justifyContent: 'center',
+                backgroundColor: pressed ? t.controlPressed : t.controlHover,
+              })}
+            >
+              <Txt kind="caption" tone="text" style={{ fontWeight: '500' }}>
+                {remoteId
+                  ? remoteScroll.newOutput ? '↓  New output' : '↓  Jump to live'
+                  : localScroll.unread ? '↓  New output' : '↓  Jump to bottom'}
+              </Txt>
+            </Pressable>
+          ) : null}
           {notice ? (
             <View pointerEvents="box-none" style={{ position: 'absolute', top: 8, left: 0, right: 0, zIndex: 2 }}>
               {notice}

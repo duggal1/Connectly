@@ -11,6 +11,7 @@ export interface Events {
   state(s: LinkState, detail?: string): void;
   ready(info: { session: string; resumed: boolean; reset: boolean }): void;
   data(b: Uint8Array): void;
+  scroll(state: { inMode: boolean; position: number; history: number; newOutput: boolean }): void;
   rtt(ms: number | null): void;
   exit(code: number): void;
   stats(s: MacStatsData): void;
@@ -71,6 +72,9 @@ export class TermConnection {
   private netUp: boolean | null = null;
   private netType: string | null = null;
   private session?: string;
+  private remoteId?: string;
+  private scrollMode = false;
+  private scrollActivity = 0;
   private cols: number;
   private rows: number;
   private rx = 0;
@@ -79,10 +83,11 @@ export class TermConnection {
 
   constructor(
     private cfg: HostConfig,
-    init: { session?: string; cols: number; rows: number },
+    init: { session?: string; remoteId?: string; cols: number; rows: number },
     private ev: Events,
   ) {
     this.session = init.session;
+    this.remoteId = init.remoteId;
     this.cols = init.cols;
     this.rows = init.rows;
     this.appSub = AppState.addEventListener('change', (state) => {
@@ -138,6 +143,17 @@ export class TermConnection {
     if (this.live) this.sendRaw(encode(T.CONTROL, utf8Encode(JSON.stringify({ op: 'kill' }))));
   }
 
+  scroll(direction: 'up' | 'down', lines: number) {
+    if (!this.live || !this.remoteId) return;
+    this.sendRaw(encode(T.CONTROL, utf8Encode(JSON.stringify({ op: 'scroll', dir: direction, lines }))));
+  }
+
+  scrollToLive() {
+    if (this.live && this.remoteId) {
+      this.sendRaw(encode(T.CONTROL, utf8Encode(JSON.stringify({ op: 'live' }))));
+    }
+  }
+
   private open() {
     if (this.stopped) return;
     const baseUrl = wsUrl(this.cfg);
@@ -172,7 +188,8 @@ export class TermConnection {
       console.info('[terminal] websocket opened', { url, readyState: ws.readyState });
       const hello = {
         op: 'hello', v: 2, token: this.cfg.token,
-        session: this.session ?? '', cols: this.cols, rows: this.rows, offset: this.rx,
+        session: this.remoteId ? '' : this.session ?? '', attach: this.remoteId ?? '',
+        cols: this.cols, rows: this.rows, offset: this.rx,
       };
       this.sendRaw(encode(T.CONTROL, utf8Encode(JSON.stringify(hello))));
     };
@@ -260,6 +277,22 @@ export class TermConnection {
         this.teardown();
         this.ev.state('gone');
         break;
+      case 'scroll': {
+        const inMode = message.inMode === true;
+        const activity = typeof message.activity === 'number' && Number.isFinite(message.activity)
+          ? message.activity
+          : 0;
+        if (inMode && !this.scrollMode) this.scrollActivity = activity;
+        if (!inMode) this.scrollActivity = activity;
+        this.scrollMode = inMode;
+        this.ev.scroll({
+          inMode,
+          position: typeof message.pos === 'number' ? message.pos : 0,
+          history: typeof message.hist === 'number' ? message.hist : 0,
+          newOutput: inMode && activity > this.scrollActivity,
+        });
+        break;
+      }
       case 'exit': {
         this.terminal = true;
         this.teardown();

@@ -65,14 +65,15 @@ func (c *Client) writer() {
 // ---------------------------------------------------------------------
 
 type Server struct {
-	cfg   Config
-	token []byte
-	mgr   *Manager
-	stats *StatsSource
-	act   *Actions
-	vis   *Visual
-	lim   *limiter
-	up    websocket.Upgrader
+	cfg    Config
+	token  []byte
+	mgr    *Manager
+	stats  *StatsSource
+	act    *Actions
+	vis    *Visual
+	remote *Remote
+	lim    *limiter
+	up     websocket.Upgrader
 }
 
 func newServer(cfg Config, token string, mgr *Manager, stats *StatsSource, actions *Actions, visual *Visual) *Server {
@@ -93,6 +94,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/sessions", s.auth(s.listSessions))
 	mux.HandleFunc("GET /api/stats", s.auth(s.getStats))
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.auth(s.deleteSession))
+	s.mountRemote(mux)
 	s.mountActions(mux, s.auth, true)
 	s.mountVisual(mux)
 	return mux
@@ -196,6 +198,7 @@ type hello struct {
 	V       int    `json:"v"`
 	Token   string `json:"token"`
 	Session string `json:"session"`
+	Attach  string `json:"attach"`
 	Cols    uint16 `json:"cols"`
 	Rows    uint16 `json:"rows"`
 	Offset  uint64 `json:"offset"`
@@ -274,7 +277,19 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	cols, rows := clampSize(h.Cols, h.Rows)
 	var sess *Session
 	resumed := false
-	if h.Session != "" {
+	remoteAttach := h.Attach != ""
+	if remoteAttach {
+		if s.remote == nil {
+			reject(conn, "Remote tmux sessions are unavailable on this Mac.")
+			return
+		}
+		sess, err = s.remote.openClient(h.Attach, cols, rows)
+		if err != nil {
+			reject(conn, err.Error())
+			return
+		}
+		defer s.remote.clientDone(sess)
+	} else if h.Session != "" {
 		sess = s.mgr.get(h.Session)
 		if sess == nil {
 			slog.Info("websocket session is gone", "trace_id", traceID, "remote_ip", ip, "session", h.Session)
@@ -301,7 +316,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		go sess.redraw()
 	}
 	go s.pushStats(c)
-	slog.Info("websocket attached", "trace_id", traceID, "remote_ip", ip, "session", sess.ID, "resumed", resumed, "reset", reset, "offset", h.Offset)
+	if remoteAttach {
+		go s.pushRemoteScroll(c, sess.Remote)
+	}
+	slog.Info("websocket attached", "trace_id", traceID, "remote_ip", ip, "session", sess.ID, "remote_session", sess.Remote, "resumed", resumed, "reset", reset, "offset", h.Offset)
 
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(25 * time.Second))
@@ -324,14 +342,70 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			c.enqueue(encode(THeartbeat, p))
 		case TControl:
 			var m struct {
-				Op string `json:"op"`
+				Op    string `json:"op"`
+				Dir   string `json:"dir"`
+				Lines int    `json:"lines"`
 			}
-			if json.Unmarshal(p, &m) == nil && m.Op == "kill" {
-				sess.kill()
+			if json.Unmarshal(p, &m) != nil {
+				continue
+			}
+			switch m.Op {
+			case "kill":
+				if sess.Remote != "" {
+					if err := s.remote.kill(sess.Remote); err != nil {
+						slog.Warn("remote session kill failed", "trace_id", traceID, "remote_ip", ip, "session", sess.Remote, "err", err)
+					} else {
+						slog.Info("remote session killed via websocket", "trace_id", traceID, "remote_ip", ip, "session", sess.Remote)
+					}
+				} else {
+					sess.kill()
+				}
+			case "scroll", "live":
+				if sess.Remote == "" || s.remote == nil {
+					continue
+				}
+				direction := m.Dir
+				if m.Op == "live" {
+					direction = "live"
+				}
+				state, scrollErr := s.remote.scroll(sess.Remote, direction, m.Lines)
+				if scrollErr == nil {
+					c.enqueue(controlFrame(map[string]any{
+						"op": "scroll", "inMode": state.InMode, "pos": state.Position,
+						"hist": state.History, "activity": state.Activity,
+					}))
+				}
 			}
 		}
 	}
 	sess.detach(c)
 	c.close()
 	slog.Info("websocket detached", "trace_id", traceID, "remote_ip", ip, "session", sess.ID, "read_error", err)
+}
+
+func (s *Server) pushRemoteScroll(client *Client, sessionID string) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	var previous tmuxScrollState
+	first := true
+	for {
+		select {
+		case <-client.done:
+			return
+		case <-ticker.C:
+			state, err := s.remote.scrollState(sessionID)
+			if err != nil {
+				continue
+			}
+			if !first && state == previous {
+				continue
+			}
+			first = false
+			previous = state
+			client.enqueue(controlFrame(map[string]any{
+				"op": "scroll", "inMode": state.InMode, "pos": state.Position,
+				"hist": state.History, "activity": state.Activity,
+			}))
+		}
+	}
 }

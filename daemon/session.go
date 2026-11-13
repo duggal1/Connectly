@@ -30,6 +30,7 @@ type Session struct {
 	ID      string
 	Shell   string
 	Created time.Time
+	Remote  string
 
 	ptmx *os.File
 	cmd  *exec.Cmd
@@ -175,6 +176,12 @@ func (s *Session) redraw() {
 }
 
 func (s *Session) kill() {
+	s.mu.Lock()
+	done := s.exited
+	s.mu.Unlock()
+	if done {
+		return
+	}
 	if s.cmd.Process == nil {
 		return
 	}

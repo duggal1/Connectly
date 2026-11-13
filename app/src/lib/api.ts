@@ -34,6 +34,18 @@ function describeError(error: unknown): { name: string; message: string } {
   return { name: typeof error, message: String(error) };
 }
 
+function apiErrorMessage(body: string, fallback: string): string {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed === 'object' && parsed !== null && 'error' in parsed && typeof parsed.error === 'string') {
+      return parsed.error;
+    }
+  } catch {
+    return body.trim() || fallback;
+  }
+  return body.trim() || fallback;
+}
+
 const hostPart = (h: string) => (h.includes(':') && !h.startsWith('[') ? `[${h}]` : h);
 export const httpBase = (c: HostConfig) => `${c.tls ? 'https' : 'http'}://${hostPart(c.host)}:${c.port}`;
 export const wsUrl = (c: HostConfig) => `${c.tls ? 'wss' : 'ws'}://${hostPart(c.host)}:${c.port}/ws`;
@@ -90,7 +102,7 @@ async function request<T>(cfg: HostConfig, path: string, init: RequestInit | und
     if (r.status === 401) throw new ApiError(`Wrong token (HTTP 401, request ${requestId}).`, 401, requestId);
     if (r.status === 429) throw new ApiError(`Too many attempts; locked for 5 minutes (HTTP 429, request ${requestId}).`, 429, requestId);
     if (!r.ok) {
-      throw new ApiError(responseBody.trim() || `Daemon returned HTTP ${r.status} ${r.statusText} (request ${requestId}).`, r.status, requestId);
+      throw new ApiError(apiErrorMessage(responseBody, `Daemon returned HTTP ${r.status} ${r.statusText} (request ${requestId}).`), r.status, requestId);
     }
     if (r.status === 204) return undefined as T;
     return (await r.json()) as T;

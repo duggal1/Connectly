@@ -51,6 +51,10 @@ export function Workspace({ cfg, onHost }: { cfg: HostConfig; onHost: () => void
     dispatch({ type: 'open', key: newKey(), session });
   }, [dispatch]);
 
+  const openRemote = useCallback((remoteId: string, remoteName: string) => {
+    dispatch({ type: 'openRemote', key: newKey(), remoteId, remoteName });
+  }, [dispatch]);
+
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (pane.kind === 'screen') {
@@ -83,7 +87,7 @@ export function Workspace({ cfg, onHost }: { cfg: HostConfig; onHost: () => void
       <TabBar
         items={tabs.map((tab) => ({
           key: tab.key,
-          label: titles[tab.key] || (tab.session ? 'Terminal' : 'New'),
+          label: titles[tab.key] || tab.remoteName || (tab.session ? 'Terminal' : 'New'),
         }))}
         pane={pane}
         onShow={(nextPane) => dispatch({ type: 'show', pane: nextPane })}
@@ -99,6 +103,8 @@ export function Workspace({ cfg, onHost }: { cfg: HostConfig; onHost: () => void
               <TerminalScreen
                 cfg={cfg}
                 session={tab.session}
+                remoteId={tab.remoteId}
+                remoteName={tab.remoteName}
                 active={active}
                 onBound={(session) => dispatch({ type: 'bind', key: tab.key, session })}
                 onTitle={(title) => setTitles((previous) => previous[tab.key] === title
@@ -116,9 +122,11 @@ export function Workspace({ cfg, onHost }: { cfg: HostConfig; onHost: () => void
               <SessionsScreen
                 cfg={cfg}
                 onOpen={open}
+                onOpenRemote={openRemote}
                 onNew={() => open()}
                 onHost={onHost}
                 onEnded={(session) => dispatch({ type: 'closeSession', session })}
+                onRemoteEnded={(remoteId) => dispatch({ type: 'closeRemote', remoteId })}
               />
             </Fade>
           </View>

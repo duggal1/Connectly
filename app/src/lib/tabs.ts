@@ -8,6 +8,8 @@ export const MAX_TABS = 5;
 export interface Tab {
   key: string;
   session?: string;
+  remoteId?: string;
+  remoteName?: string;
 }
 
 export type Pane =
@@ -25,9 +27,11 @@ export type TabAction =
   | { type: 'load'; state: TabsState }
   | { type: 'show'; pane: Pane }
   | { type: 'open'; key: string; session?: string }
+  | { type: 'openRemote'; key: string; remoteId: string; remoteName: string }
   | { type: 'bind'; key: string; session: string }
   | { type: 'close'; key: string }
   | { type: 'closeSession'; session: string }
+  | { type: 'closeRemote'; remoteId: string }
   | { type: 'restart'; key: string; next: string };
 
 export const newKey = () => `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -61,6 +65,18 @@ export function tabsReducer(state: TabsState, action: TabAction): TabsState {
       while (tabs.length > MAX_TABS) tabs.shift();
       return { tabs, pane: { kind: 'tab', key: action.key } };
     }
+    case 'openRemote': {
+      const existing = state.tabs.find((tab) => tab.remoteId === action.remoteId);
+      if (existing) {
+        return {
+          tabs: state.tabs.map((tab) => tab.key === existing.key ? { ...tab, remoteName: action.remoteName } : tab),
+          pane: { kind: 'tab', key: existing.key },
+        };
+      }
+      const tabs = [...state.tabs, { key: action.key, remoteId: action.remoteId, remoteName: action.remoteName }];
+      while (tabs.length > MAX_TABS) tabs.shift();
+      return { tabs, pane: { kind: 'tab', key: action.key } };
+    }
     case 'bind':
       if (!state.tabs.some((tab) => tab.key === action.key && tab.session !== action.session)) return state;
       return {
@@ -71,6 +87,8 @@ export function tabsReducer(state: TabsState, action: TabAction): TabsState {
       return remove(state, (tab) => tab.key === action.key);
     case 'closeSession':
       return remove(state, (tab) => tab.session === action.session);
+    case 'closeRemote':
+      return remove(state, (tab) => tab.remoteId === action.remoteId);
     case 'restart':
       if (!state.tabs.some((tab) => tab.key === action.key)) return state;
       return {
@@ -83,7 +101,7 @@ export function tabsReducer(state: TabsState, action: TabAction): TabsState {
 }
 
 interface SavedTabs {
-  tabs: { key: string; session: string }[];
+  tabs: { key: string; session?: string; remoteId?: string; remoteName?: string }[];
   active?: string;
 }
 
@@ -117,8 +135,18 @@ function parseSaved(raw: string): SavedTabs | null {
     if (!isRecord(value) || !isArray(value.tabs)) return null;
     const tabs: SavedTabs['tabs'] = [];
     for (const entry of value.tabs) {
-      if (!isRecord(entry) || typeof entry.key !== 'string' || typeof entry.session !== 'string') return null;
-      tabs.push({ key: entry.key, session: entry.session });
+      if (!isRecord(entry) || typeof entry.key !== 'string') return null;
+      if (typeof entry.session === 'string') {
+        tabs.push({ key: entry.key, session: entry.session });
+      } else if (typeof entry.remoteId === 'string') {
+        tabs.push({
+          key: entry.key,
+          remoteId: entry.remoteId,
+          remoteName: typeof entry.remoteName === 'string' ? entry.remoteName : entry.remoteId,
+        });
+      } else {
+        return null;
+      }
     }
     return {
       tabs,
@@ -143,7 +171,7 @@ async function loadState(key: string): Promise<TabsState> {
 }
 
 function serializeState(state: TabsState): string {
-  const tabs = state.tabs.filter((tab): tab is Tab & { session: string } => Boolean(tab.session));
+  const tabs = state.tabs.filter((tab) => Boolean(tab.session || tab.remoteId));
   const activeKey = state.pane.kind === 'tab' ? state.pane.key : undefined;
   const active = activeKey && tabs.some((tab) => tab.key === activeKey)
     ? activeKey

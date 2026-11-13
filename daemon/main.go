@@ -32,6 +32,9 @@ type Config struct {
 	AgentSocket   string
 	NoVisual      bool
 	VisualTTL     time.Duration
+	TmuxSocket    string
+	TmuxBin       string
+	TmuxMouse     bool
 }
 
 func configDir() string {
@@ -98,6 +101,13 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		os.Exit(runMCP(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "hook" {
+		fs := flag.NewFlagSet("hook", flag.ExitOnError)
+		socket := fs.String("tmux-socket", defaultTmuxSocket(), "private tmux socket path")
+		_ = fs.Parse(os.Args[2:])
+		fmt.Print(tmuxHook(*socket))
+		return
+	}
 
 	var cfg Config
 	printToken := flag.Bool("print-token", false, "print the auth token and exit")
@@ -115,6 +125,9 @@ func main() {
 	flag.StringVar(&cfg.AgentSocket, "agent-socket", filepath.Join(configDir(), "agent.sock"), "Unix socket for local agents; empty disables it")
 	flag.BoolVar(&cfg.NoVisual, "no-visual", false, "disable on-demand Screen Sharing")
 	flag.DurationVar(&cfg.VisualTTL, "visual-ttl", 5*time.Minute, "auto-stop Screen Sharing after this long")
+	flag.StringVar(&cfg.TmuxSocket, "tmux-socket", defaultTmuxSocket(), "private tmux socket for remote sessions")
+	flag.StringVar(&cfg.TmuxBin, "tmux-bin", "", "tmux executable (default PATH, then Homebrew locations)")
+	flag.BoolVar(&cfg.TmuxMouse, "tmux-mouse", true, "enable tmux mouse scrolling for Mac clients")
 	flag.Parse()
 
 	token, err := loadToken(cfg.TokenFile)
@@ -173,6 +186,13 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	remote, err := newRemote(cfg, wake)
+	if err != nil {
+		slog.Warn("tmux remote sessions disabled", "err", err)
+	} else {
+		srv.remote = remote
+		go remote.run(ctx)
+	}
 	if cfg.AgentSocket != "" {
 		go func() {
 			if err := serveAgent(ctx, cfg.AgentSocket, srv.localRoutes()); err != nil {

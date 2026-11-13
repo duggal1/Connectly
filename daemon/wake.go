@@ -16,6 +16,7 @@ import (
 type Wake struct {
 	mu      sync.Mutex
 	n       int
+	reasons map[string]bool
 	cmd     *exec.Cmd
 	enabled bool
 	lid     bool
@@ -26,7 +27,7 @@ type Wake struct {
 }
 
 func newWake(enabled, lid bool, minBatt int, stats *StatsSource) *Wake {
-	return &Wake{enabled: enabled, lid: lid, minBatt: minBatt, stats: stats}
+	return &Wake{enabled: enabled, lid: lid, minBatt: minBatt, stats: stats, reasons: map[string]bool{}}
 }
 
 // Init clears a stale hold left by a crashed run.
@@ -52,10 +53,25 @@ func (w *Wake) Release() {
 	w.apply()
 }
 
+func (w *Wake) SetReason(reason string, active bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.reasons == nil {
+		w.reasons = map[string]bool{}
+	}
+	if active {
+		w.reasons[reason] = true
+	} else {
+		delete(w.reasons, reason)
+	}
+	w.apply()
+}
+
 func (w *Wake) Shutdown() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.n = 0
+	w.reasons = map[string]bool{}
 	w.stopCaffeinate()
 	if w.lidOn {
 		w.setLid(false, true)
@@ -78,7 +94,7 @@ func (w *Wake) loop(ctx context.Context) {
 }
 
 func (w *Wake) wantLid() bool {
-	if !w.enabled || !w.lid || w.n == 0 || w.stats == nil {
+	if !w.enabled || !w.lid || !w.wantedLocked() || w.stats == nil {
 		return false
 	}
 	st := w.stats.Get()
@@ -89,12 +105,24 @@ func (w *Wake) wantLid() bool {
 }
 
 func (w *Wake) apply() {
-	if w.enabled && w.n > 0 {
+	if w.enabled && w.wantedLocked() {
 		w.startCaffeinate()
 	} else {
 		w.stopCaffeinate()
 	}
 	w.setLid(w.wantLid(), false)
+}
+
+func (w *Wake) wantedLocked() bool {
+	if w.n > 0 {
+		return true
+	}
+	for _, active := range w.reasons {
+		if active {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *Wake) startCaffeinate() {
