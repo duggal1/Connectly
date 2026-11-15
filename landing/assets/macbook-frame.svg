@@ -1,7 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" fill="none" shape-rendering="geometricPrecision">
-  <path fill="#080809" d="M78 8h1044c39 0 70 31 70 70v604c0 39-31 70-70 70H78c-39 0-70-31-70-70V78C8 39 39 8 78 8Z"/>
-  <path stroke="#52525B" stroke-width="12" d="M78 8h1044c39 0 70 31 70 70v604c0 39-31 70-70 70H78c-39 0-70-31-70-70V78C8 39 39 8 78 8Z"/>
-  <path stroke="#242429" stroke-width="3" d="M79 24h1042c30 0 54 24 54 54v596c0 30-24 54-54 54H79c-30 0-54-24-54-54V78c0-30 24-54 54-54Z"/>
-  <circle cx="600" cy="19" r="4" fill="#3F3F46"/>
-  <circle cx="600" cy="19" r="1.5" fill="#17171A"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 546" fill="none">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#46464d"/>
+      <stop offset=".5" stop-color="#2c2c31"/>
+      <stop offset="1" stop-color="#1f1f23"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9a9aa3"/>
+      <stop offset=".12" stop-color="#5b5b63"/>
+      <stop offset="1" stop-color="#34343a"/>
+    </linearGradient>
+    <linearGradient id="glare" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".07"/>
+      <stop offset=".45" stop-color="#fff" stop-opacity=".015"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="cam" cx=".4" cy=".35" r=".7">
+      <stop offset="0" stop-color="#2b3a66"/>
+      <stop offset="1" stop-color="#07070d"/>
+    </radialGradient>
+    <clipPath id="scr"><rect x="15" y="15" width="830" height="516" rx="11"/></clipPath>
+  </defs>
+  <path fill="url(#body)" fill-rule="evenodd"
+    d="M26 0H834A26 26 0 0 1 860 26V520A26 26 0 0 1 834 546H26A26 26 0 0 1 0 520V26A26 26 0 0 1 26 0Z
+       M26 7H834A19 19 0 0 1 853 26V520A19 19 0 0 1 834 539H26A19 19 0 0 1 7 520V26A19 19 0 0 1 26 7Z"/>
+  <path stroke="url(#edge)" stroke-width="1.5"
+    d="M26 .75H834A25.25 25.25 0 0 1 859.25 26V520A25.25 25.25 0 0 1 834 545.25H26A25.25 25.25 0 0 1 .75 520V26A25.25 25.25 0 0 1 26 .75Z"/>
+  <path fill="#000" fill-rule="evenodd"
+    d="M26 7H834A19 19 0 0 1 853 26V520A19 19 0 0 1 834 539H26A19 19 0 0 1 7 520V26A19 19 0 0 1 26 7Z
+       M26 15H834A11 11 0 0 1 845 26V520A11 11 0 0 1 834 531H26A11 11 0 0 1 15 520V26A11 11 0 0 1 26 15Z"/>
+  <g clip-path="url(#scr)"><path d="M15 15H560L300 531H15Z" fill="url(#glare)"/></g>
+  <path fill="#000" d="M366 7H494V27A12 12 0 0 1 482 39H378A12 12 0 0 1 366 27Z"/>
+  <circle cx="430" cy="23" r="4.2" fill="#0b0b12" stroke="#1a1a24" stroke-width="1"/>
+  <circle cx="430" cy="23" r="2.2" fill="url(#cam)"/>
+  <circle cx="452" cy="23" r="1.6" fill="#07e00a" opacity=".55"/>
 </svg>
