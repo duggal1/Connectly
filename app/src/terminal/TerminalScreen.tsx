@@ -88,7 +88,6 @@ export function TerminalScreen({
   const [echo, setEcho] = useState<number | null>(null);
   const [mac, setMac] = useState<MacSnapshot | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
-  const [sid, setSid] = useState<string | undefined>(session);
   const [title, setTitle] = useState('');
   const [renderer, setRenderer] = useState<'loading' | 'ok' | 'failed'>('loading');
   const [rendererMsg, setRendererMsg] = useState('');
@@ -134,7 +133,6 @@ export function TerminalScreen({
           outBuf.current = [];
           js('window.__reset()');
         }
-        setSid(info.session);
         if (!remoteId) onBound(info.session);
         setExitCode(null);
       },
@@ -195,7 +193,7 @@ export function TerminalScreen({
         const cols = parsed.cols;
         const rows = parsed.rows;
         if (typeof cols !== 'number' || typeof rows !== 'number') return;
-        size.current = { cols, rows };
+        if (cols >= 20 && rows >= 5) size.current = { cols, rows };
         setRenderer('ok');
         if (!conn.current) startConn();
         else {
@@ -214,8 +212,10 @@ export function TerminalScreen({
         break;
       case 'resize':
         if (typeof parsed.cols === 'number' && typeof parsed.rows === 'number') {
-          size.current = { cols: parsed.cols, rows: parsed.rows };
-          conn.current?.setSize(parsed.cols, parsed.rows);
+          if (parsed.cols >= 20 && parsed.rows >= 5) {
+            size.current = { cols: parsed.cols, rows: parsed.rows };
+            conn.current?.setSize(parsed.cols, parsed.rows);
+          }
         }
         break;
       case 'bell':
@@ -257,7 +257,7 @@ export function TerminalScreen({
 
   const last = samples.length ? samples[samples.length - 1] : undefined;
   const speed = link !== 'live' ? '—' : echo != null ? `echo ${echo} ms` : last != null ? `${last} ms` : '—';
-  const heading = title || remoteName || (sid ? `Session ${sid.slice(0, 4)}` : 'New session');
+  const heading = title || remoteName || 'Terminal';
   const lead =
     link === 'live' ? <PixelMark name="dot" cell={3} colors={{ '#': t.statusOK }} />
     : link === 'failed' ? <PixelMark name="failed" cell={2} colors={{ '#': t.statusBad }} />

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -120,6 +121,24 @@ func lastUsefulLine(output string) string {
 		}
 	}
 	return ""
+}
+
+var agentErrorPattern = regexp.MustCompile(`(?i)\b(?:error|fatal|panic|exception|traceback|failed|failure)\b`)
+
+func hasAgentError(output string) bool {
+	lines := strings.Split(output, "\n")
+	start := max(0, len(lines)-24)
+	for index := len(lines) - 1; index >= start; index-- {
+		line := strings.TrimSpace(lines[index])
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "no error") || strings.HasPrefix(lower, "0 errors") {
+			continue
+		}
+		if agentErrorPattern.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 func agentOf(command string) string {

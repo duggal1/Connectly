@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AccessibilityInfo, Alert, Modal, Pressable, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import type { HostConfig } from '../lib/storage';
@@ -28,8 +28,10 @@ function compactPath(path: string): string {
 }
 
 function activityLabel(session: RemoteSession): string {
+  if (session.state === 'error') return 'Error';
   if (session.state === 'shell') return 'Prompt';
-  return session.state === 'running' ? 'Running' : `Idle ${ago(new Date(session.lastActive).toISOString())}`;
+  if (session.state === 'running') return 'Running';
+  return session.lastActive > 0 ? `Idle ${ago(new Date(session.lastActive).toISOString())}` : 'Idle';
 }
 
 function RemoteRow({
@@ -43,7 +45,10 @@ function RemoteRow({
 }) {
   const t = useTok();
   const label = AGENT[session.agent] ?? (session.state === 'shell' ? 'Shell' : session.command || 'Terminal');
-  const statusColor = session.state === 'running' ? t.statusOK : session.state === 'idle' ? t.text2 : t.accentText;
+  const statusColor = session.state === 'running'
+    ? t.statusOK
+    : session.state === 'error' ? t.statusBad
+    : session.state === 'idle' ? t.text2 : t.accentText;
   const clients = [
     session.macClients > 0 ? `${session.macClients} Mac` : '',
     session.phones > 0 ? `${session.phones} phone${session.phones === 1 ? '' : 's'}` : '',
@@ -101,16 +106,26 @@ function RemoteRow({
   );
 }
 
-function OutsideRow({ agent, onStop }: { agent: LooseAgent; onStop: () => void }) {
+function OutsideRow({ agent, onOpen, onStop }: { agent: LooseAgent; onOpen: () => void; onStop: () => void }) {
   const t = useTok();
   return (
     <View style={{ minHeight: 56, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-      <PixelMark name="dot" cell={2} colors={{ '#': agent.state === 'running' ? t.statusOK : t.text2 }} />
-      <View style={{ flex: 1, gap: 2 }}>
-        <Txt kind="label">{AGENT[agent.agent] ?? agent.agent}</Txt>
-        <Txt kind="caption" tone="text2" numberOfLines={1}>{compactPath(agent.cwd) || agent.tty}</Txt>
-      </View>
-      <Txt kind="caption" tone="text2" style={tabular}>{ago(new Date(agent.startedAt).toISOString())}</Txt>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${AGENT[agent.agent] ?? agent.agent} on the Mac desktop`}
+        onPress={onOpen}
+        style={({ pressed }) => ({ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12, opacity: pressed ? 0.72 : 1 })}
+      >
+        <PixelMark name="dot" cell={2} colors={{ '#': t.text2 }} />
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Txt kind="label">{AGENT[agent.agent] ?? agent.agent}</Txt>
+          <Txt kind="caption" tone="text2" numberOfLines={1}>{compactPath(agent.cwd) || agent.tty}</Txt>
+        </View>
+        <View style={{ alignItems: 'flex-end', gap: 2 }}>
+          <Txt kind="caption" tone="text2">On Mac</Txt>
+          <Txt kind="caption" tone="text2" style={tabular}>{ago(new Date(agent.startedAt).toISOString())}</Txt>
+        </View>
+      </Pressable>
       <Button label="Stop" kind="secondary" surface="field" height={H.small} onPress={onStop} />
     </View>
   );
@@ -118,58 +133,36 @@ function OutsideRow({ agent, onStop }: { agent: LooseAgent; onStop: () => void }
 
 export function RemoteSessionsPanel({
   cfg,
-  refreshKey,
+  snapshot,
+  info,
+  error,
+  loading,
+  onRefresh,
   onOpen,
+  onOpenLoose,
   onEnded,
 }: {
   cfg: HostConfig;
-  refreshKey: number;
+  snapshot: RemoteSnapshot | null;
+  info: RemoteInfo | null;
+  error: string;
+  loading: boolean;
+  onRefresh: () => void;
   onOpen: (id: string, name: string) => void;
+  onOpenLoose: (agent: LooseAgent) => void;
   onEnded: (id: string) => void;
 }) {
   const t = useTok();
-  const [snapshot, setSnapshot] = useState<RemoteSnapshot | null>(null);
-  const [info, setInfo] = useState<RemoteInfo | null>(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
   const [renameTarget, setRenameTarget] = useState<RemoteSession | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renameBusy, setRenameBusy] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
-  const hasSnapshot = useRef(false);
-
   useEffect(() => {
     let live = true;
     AccessibilityInfo.isReduceMotionEnabled().then((value) => { if (live) setReduceMotion(value); });
     const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
     return () => { live = false; subscription.remove(); };
   }, []);
-
-  const load = useCallback(async () => {
-    const firstLoad = !hasSnapshot.current;
-    if (firstLoad) setLoading(true);
-    const [infoResult, listResult] = await Promise.allSettled([remoteApi.info(cfg), remoteApi.list(cfg)]);
-    if (infoResult.status === 'fulfilled') setInfo(infoResult.value);
-    if (listResult.status === 'fulfilled') {
-      hasSnapshot.current = true;
-      setSnapshot(listResult.value);
-      setError('');
-    } else {
-      const status = listResult.reason instanceof Error && 'status' in listResult.reason
-        ? Number(listResult.reason.status)
-        : 0;
-      setError(status === 503
-        ? 'Install tmux on the Mac, then restart termd.'
-        : listResult.reason instanceof Error ? listResult.reason.message : 'Could not load Mac terminals.');
-    }
-    setLoading(false);
-  }, [cfg]);
-
-  useEffect(() => {
-    void load();
-    const interval = setInterval(() => void load(), 5000);
-    return () => clearInterval(interval);
-  }, [load, refreshKey]);
 
   const end = (session: RemoteSession) => {
     Alert.alert(`End ${session.name}?`, 'This stops the session on your Mac.', [
@@ -180,7 +173,7 @@ export function RemoteSessionsPanel({
         onPress: () => {
           void remoteApi.end(cfg, session.id).then(() => {
             onEnded(session.id);
-            void load();
+            onRefresh();
           }).catch((reason: unknown) => {
             Alert.alert('Could not end session', reason instanceof Error ? reason.message : 'Request failed.');
           });
@@ -195,7 +188,7 @@ export function RemoteSessionsPanel({
       { text: 'Open', onPress: () => onOpen(session.id, session.name) },
       {
         text: 'Interrupt',
-        onPress: () => { void remoteApi.interrupt(cfg, session.id).catch((reason: unknown) => Alert.alert('Could not interrupt', reason instanceof Error ? reason.message : 'Request failed.')); },
+        onPress: () => { void remoteApi.interrupt(cfg, session.id).then(onRefresh).catch((reason: unknown) => Alert.alert('Could not interrupt', reason instanceof Error ? reason.message : 'Request failed.')); },
       },
       { text: 'Rename', onPress: () => { setRenameTarget(session); setRenameValue(session.name); } },
       { text: 'End session', style: 'destructive', onPress: () => end(session) },
@@ -207,12 +200,12 @@ export function RemoteSessionsPanel({
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Interrupt',
-        onPress: () => { void remoteApi.stopLoose(cfg, agent, 'int').then(load).catch((reason: unknown) => Alert.alert('Could not stop process', reason instanceof Error ? reason.message : 'Request failed.')); },
+        onPress: () => { void remoteApi.stopLoose(cfg, agent, 'int').then(onRefresh).catch((reason: unknown) => Alert.alert('Could not stop process', reason instanceof Error ? reason.message : 'Request failed.')); },
       },
       {
         text: 'Quit',
         style: 'destructive',
-        onPress: () => { void remoteApi.stopLoose(cfg, agent, 'term').then(load).catch((reason: unknown) => Alert.alert('Could not stop process', reason instanceof Error ? reason.message : 'Request failed.')); },
+        onPress: () => { void remoteApi.stopLoose(cfg, agent, 'term').then(onRefresh).catch((reason: unknown) => Alert.alert('Could not stop process', reason instanceof Error ? reason.message : 'Request failed.')); },
       },
     ]);
   };
@@ -223,7 +216,7 @@ export function RemoteSessionsPanel({
     try {
       const result = await remoteApi.rename(cfg, renameTarget.id, renameValue.trim());
       setRenameTarget(null);
-      await load();
+      onRefresh();
       onOpen(result.id, result.name);
     } catch (reason: unknown) {
       Alert.alert('Could not rename session', reason instanceof Error ? reason.message : 'Request failed.');
@@ -235,8 +228,13 @@ export function RemoteSessionsPanel({
   const sessions = snapshot?.sessions ?? [];
   const loose = snapshot?.loose ?? [];
   const running = sessions.filter((session) => session.state === 'running').length;
+  const errors = sessions.filter((session) => session.state === 'error').length;
   const status = sessions.length
-    ? `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}, ${running} active`
+    ? [
+        `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}`,
+        running ? `${running} running` : '',
+        errors ? `${errors} error${errors === 1 ? '' : 's'}` : '',
+      ].filter(Boolean).join(', ')
     : info?.available ? 'Private tmux sessions' : 'tmux required';
 
   return (
@@ -248,7 +246,7 @@ export function RemoteSessionsPanel({
 
       {error ? (
         <Notice text={error} surface="well">
-          <Button label="Retry" kind="secondary" height={H.small} onPress={() => void load()} />
+          <Button label="Retry" kind="secondary" height={H.small} onPress={onRefresh} />
         </Notice>
       ) : loading && snapshot === null ? (
         <View style={{ height: 56, justifyContent: 'center', paddingHorizontal: 12 }}><WaitCells /></View>
@@ -289,11 +287,11 @@ export function RemoteSessionsPanel({
         <View style={{ paddingTop: 12, gap: 4 }}>
           <Txt kind="label" style={{ paddingHorizontal: 12 }}>Outside tmux</Txt>
           <Txt kind="caption" tone="text2" style={{ paddingHorizontal: 12, paddingBottom: 4 }}>
-            Visible and stoppable. These terminals cannot be attached after they have started.
+            Open these on the Mac desktop.
           </Txt>
           <View style={{ gap: 2, padding: 4, borderRadius: R.card, overflow: 'hidden', backgroundColor: t.well }}>
             {loose.map((agent) => (
-              <OutsideRow key={`${agent.pid}-${agent.startedAt}`} agent={agent} onStop={() => stopOutside(agent)} />
+              <OutsideRow key={`${agent.pid}-${agent.startedAt}`} agent={agent} onOpen={() => onOpenLoose(agent)} onStop={() => stopOutside(agent)} />
             ))}
           </View>
         </View>

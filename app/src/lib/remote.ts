@@ -2,7 +2,7 @@ import { api, json } from './api';
 import type { HostConfig } from './storage';
 
 export type AgentKind = 'claude' | 'codex' | 'opencode' | 'gemini' | 'aider' | '';
-export type RemoteState = 'running' | 'idle' | 'shell';
+export type RemoteState = 'running' | 'idle' | 'shell' | 'error';
 
 export interface RemoteSession {
   id: string;
@@ -29,7 +29,7 @@ export interface LooseAgent {
   tty: string;
   cwd: string;
   startedAt: number;
-  state: 'running' | 'idle';
+  state: 'unknown';
 }
 
 export interface RemoteSnapshot {
@@ -69,4 +69,6 @@ export const remoteApi = {
     api<void>(cfg, `/api/remote/sessions/${encodeURIComponent(id)}/keys`, json('POST', { keys })),
   stopLoose: (cfg: HostConfig, agent: LooseAgent, how: 'int' | 'term' | 'kill') =>
     api<void>(cfg, `/api/remote/loose/${agent.pid}/stop`, json('POST', { startedAt: agent.startedAt, how })),
+  focusLoose: (cfg: HostConfig, agent: LooseAgent) =>
+    api<void>(cfg, `/api/remote/loose/${agent.pid}/focus`, json('POST', { startedAt: agent.startedAt }), 12000),
 };

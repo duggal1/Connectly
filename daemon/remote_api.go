@@ -16,6 +16,32 @@ func (s *Server) mountRemote(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/remote/sessions/{id}/keys", s.auth(s.handleRemoteKeys))
 	mux.HandleFunc("DELETE /api/remote/sessions/{id}", s.auth(s.handleRemoteDelete))
 	mux.HandleFunc("POST /api/remote/loose/{pid}/stop", s.auth(s.handleLooseStop))
+	mux.HandleFunc("POST /api/remote/loose/{pid}/focus", s.auth(s.handleLooseFocus))
+}
+
+func (s *Server) handleLooseFocus(w http.ResponseWriter, r *http.Request) {
+	if s.remote == nil {
+		remoteError(w, errTmuxUnavailable)
+		return
+	}
+	pid, err := strconv.Atoi(r.PathValue("pid"))
+	if err != nil || pid <= 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid process id."})
+		return
+	}
+	var body struct {
+		StartedAt int64 `json:"startedAt"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if err := s.remote.focusLoose(pid, body.StartedAt); err != nil {
+		s.audit(r, true, "remote.loose_focus", "pid", pid, "ok", false, "error", err.Error())
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.audit(r, true, "remote.loose_focus", "pid", pid, "ok", true)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleRemoteInfo(w http.ResponseWriter, r *http.Request) {

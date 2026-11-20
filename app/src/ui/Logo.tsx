@@ -9,7 +9,6 @@ export function Logo({ size }: { size: number }) {
       width={size}
       height={size}
       viewBox="0 0 512 512"
-      shapeRendering="crispEdges"
       accessible
       accessibilityLabel="Connectly"
     >

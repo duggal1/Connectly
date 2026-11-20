@@ -4,11 +4,9 @@ import {
   Alert,
   Animated,
   Easing,
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
-  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -18,8 +16,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, apiOptional, ApiError } from '../lib/api';
 import type { MacStatsData, SessionInfo } from '../lib/api';
 import type { HostConfig } from '../lib/storage';
+import type { LooseAgent, RemoteInfo, RemoteSnapshot } from '../lib/remote';
 import { ago } from '../lib/time';
-import { remoteApi } from '../lib/remote';
 import { Button } from '../ui/Button';
 import { MacStats } from '../ui/MacStats';
 import { Notice } from '../ui/Notice';
@@ -428,6 +426,12 @@ export function SessionsScreen({
   onHost,
   onEnded,
   onOpenRemote,
+  onOpenLoose,
+  remoteSnapshot,
+  remoteInfo,
+  remoteError,
+  remoteLoading,
+  onRemoteRefresh,
   onRemoteEnded,
 }: {
   cfg: HostConfig;
@@ -436,6 +440,12 @@ export function SessionsScreen({
   onHost: () => void;
   onEnded?: (id: string) => void;
   onOpenRemote: (id: string, name: string) => void;
+  onOpenLoose: (agent: LooseAgent) => void;
+  remoteSnapshot: RemoteSnapshot | null;
+  remoteInfo: RemoteInfo | null;
+  remoteError: string;
+  remoteLoading: boolean;
+  onRemoteRefresh: () => void;
   onRemoteEnded: (id: string) => void;
 }) {
   const t = useTok();
@@ -452,11 +462,6 @@ export function SessionsScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
   const [hot, setHot] = useState<string | null>(null);
-  const [remoteRefreshKey, setRemoteRefreshKey] = useState(0);
-  const [creatingRemote, setCreatingRemote] = useState(false);
-  const [remoteName, setRemoteName] = useState('');
-  const [remoteCreateError, setRemoteCreateError] = useState('');
-  const [remoteCreating, setRemoteCreating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -470,7 +475,6 @@ export function SessionsScreen({
         statsRequest,
       ]);
       setList(sessions);
-      setRemoteRefreshKey((current) => current + 1);
       if (statsResult.unsupported) statsUnavailable.current = true;
       if (statsResult.data) {
         setMac(statsResult.data);
@@ -494,27 +498,6 @@ export function SessionsScreen({
       onEnded?.(id);
     } catch {}
     setTimeout(load, 400);
-  };
-
-  const createRemote = async (command: string) => {
-    if (remoteCreating) return;
-    setRemoteCreating(true);
-    setRemoteCreateError('');
-    try {
-      const created = await remoteApi.create(cfg, {
-        name: remoteName.trim() || (command ? command === 'claude' ? 'Claude Code' : 'Codex' : 'Shell'),
-        command,
-      });
-      setCreatingRemote(false);
-      setRemoteName('');
-      onOpenRemote(created.id, created.name);
-    } catch (reason: unknown) {
-      setRemoteCreateError(reason instanceof ApiError && reason.status === 503
-        ? 'tmux is not ready on the Mac. Install tmux and restart termd.'
-        : reason instanceof Error ? reason.message : 'Could not create a remote session.');
-    } finally {
-      setRemoteCreating(false);
-    }
   };
 
   // Running first, then idle, then stale
@@ -650,8 +633,13 @@ export function SessionsScreen({
       >
         <RemoteSessionsPanel
           cfg={cfg}
-          refreshKey={remoteRefreshKey}
+          snapshot={remoteSnapshot}
+          info={remoteInfo}
+          error={remoteError}
+          loading={remoteLoading}
+          onRefresh={onRemoteRefresh}
           onOpen={onOpenRemote}
+          onOpenLoose={onOpenLoose}
           onEnded={onRemoteEnded}
         />
 
@@ -686,36 +674,10 @@ export function SessionsScreen({
 
       {!error ? (
         <View style={{ position: 'absolute', left: horizontalInset, right: horizontalInset, bottom: 16 + insets.bottom }}>
-          <NewSessionButton onPress={() => { setRemoteCreateError(''); setCreatingRemote(true); }} />
+          <NewSessionButton onPress={onNew} />
         </View>
       ) : null}
 
-      <Modal transparent visible={creatingRemote} animationType={reduce ? 'none' : 'fade'} onRequestClose={() => setCreatingRemote(false)}>
-        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: t.scrim }}>
-          <Pressable accessibilityLabel="Close new session" onPress={() => setCreatingRemote(false)} style={{ flex: 1 }} />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: R.card, borderTopRightRadius: R.card, padding: 20, gap: 12 }}>
-            <Txt kind="title">New session on your Mac</Txt>
-            <View style={{ height: H.field, borderRadius: R.field, paddingHorizontal: 12, justifyContent: 'center', backgroundColor: t.field }}>
-              <TextInput
-                value={remoteName}
-                onChangeText={setRemoteName}
-                placeholder="Name (optional)"
-                placeholderTextColor={t.text2}
-                autoCapitalize="none"
-                autoCorrect={false}
-                maxLength={40}
-                selectionColor={t.accent}
-                style={{ color: t.text, fontSize: 15, padding: 0 }}
-              />
-            </View>
-            {remoteCreateError ? <Notice text={remoteCreateError} surface="well" /> : null}
-            <Button label={remoteCreating ? 'Starting' : 'Start shell'} kind="secondary" height={H.small} disabled={remoteCreating} onPress={() => void createRemote('')} />
-            <Button label="Start Claude Code" kind="secondary" height={H.small} disabled={remoteCreating} onPress={() => void createRemote('claude')} />
-            <Button label="Start Codex" kind="secondary" height={H.small} disabled={remoteCreating} onPress={() => void createRemote('codex')} />
-            <Button label="Open local shell" kind="quiet" height={H.small} disabled={remoteCreating} onPress={() => { setCreatingRemote(false); onNew(); }} />
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }

@@ -148,16 +148,20 @@ function NewTerminal({ onPress }: { onPress: () => void }) {
 
 export function TabBar({
   items,
+  available,
   pane,
   onShow,
   onClose,
   onNew,
+  onOpenAvailable,
 }: {
   items: TabItem[];
+  available: TabItem[];
   pane: Pane;
   onShow: (pane: Pane) => void;
   onClose: (key: string) => void;
   onNew: () => void;
+  onOpenAvailable: (key: string) => void;
 }) {
   const theme = useTok();
   const inTerminal = pane.kind === 'tab';
@@ -197,6 +201,9 @@ export function TabBar({
             onShow={() => onShow({ kind: 'tab', key: item.key })}
             onClose={() => onClose(item.key)}
           />
+        ))}
+        {available.map((item) => (
+          <RouteChip key={item.key} label={item.label} selected={false} onPress={() => onOpenAvailable(item.key)} />
         ))}
       </ScrollView>
       <NewTerminal onPress={onNew} />

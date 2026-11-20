@@ -30,6 +30,7 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
   const [now, setNow] = useState(Date.now());
   const [live, setLive] = useState(false);
   const [error, setError] = useState('');
+  const [requesting, setRequesting] = useState(false);
 
   const grant = useCallback(
     () => api<VisualGrant>(cfg, '/api/visual/start', { method: 'POST' }, 20000),
@@ -40,25 +41,30 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
     [cfg],
   );
 
-  useEffect(() => {
+  const requestShare = useCallback(async () => {
     const requestGeneration = ++generation.current;
-    grant()
-      .then((value) => {
-        if (generation.current !== requestGeneration) {
-          void stop();
-          return;
-        }
-        setDeadline(Date.now() + value.ttlSec * 1000);
-        setTicket(value.ticket);
-      })
-      .catch((cause: unknown) => {
-        if (generation.current === requestGeneration) setError(message(cause));
-      });
+    setRequesting(true);
+    setError('');
+    setLive(false);
+    try {
+      const value = await grant();
+      if (generation.current !== requestGeneration) return;
+      setDeadline(Date.now() + value.ttlSec * 1000);
+      setTicket(value.ticket);
+    } catch (cause: unknown) {
+      if (generation.current === requestGeneration) setError(message(cause));
+    } finally {
+      if (generation.current === requestGeneration) setRequesting(false);
+    }
+  }, [grant, stop]);
+
+  useEffect(() => {
+    void requestShare();
     return () => {
-      if (generation.current === requestGeneration) generation.current++;
+      generation.current++;
       void stop();
     };
-  }, [grant, stop]);
+  }, [requestShare, stop]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -81,29 +87,11 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
     if (value.t === 'connect') {
       setLive(true);
     } else if (value.t === 'fail') {
-      setError(typeof value.m === 'string' ? value.m : 'Sign-in failed.');
+      setError(typeof value.m === 'string' ? value.m : 'Screen sharing failed.');
     } else if (value.t === 'disconnect') {
       setLive(false);
       setError((previous) => previous || (value.clean ? 'Screen sharing ended.' : 'Connection lost.'));
     }
-  };
-
-  const extend = () => {
-    const requestGeneration = generation.current;
-    grant()
-      .then((value) => {
-        if (generation.current !== requestGeneration) {
-          void stop();
-          return;
-        }
-        setDeadline(Date.now() + value.ttlSec * 1000);
-        setTicket(value.ticket);
-        setError('');
-        setLive(false);
-      })
-      .catch((cause: unknown) => {
-        if (generation.current === requestGeneration) setError(message(cause));
-      });
   };
 
   const remaining = Math.max(0, Math.round((deadline - now) / 1000));
@@ -113,34 +101,38 @@ export function VisualScreen({ cfg, onClose }: { cfg: HostConfig; onClose: () =>
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <View style={{ height: H.bar, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 8 }}>
         <Button label="Done" kind="quiet" height={H.small} onPress={onClose} />
-        <Txt kind="title" style={{ flex: 1 }}>Screen</Txt>
+        <Txt kind="title" style={{ flex: 1 }}>Mac desktop</Txt>
         {deadline ? <Txt kind="caption" tone="text2" style={tabular}>{clock}</Txt> : null}
         <Button
-          label="Extend"
+          label={requesting || (!ticket && !error) ? 'Starting' : error ? 'Retry' : 'Extend'}
           kind="quiet"
           height={H.small}
-          disabled={!ticket || !!error}
-          onPress={extend}
+          disabled={requesting || (!ticket && !error)}
+          onPress={() => void requestShare()}
         />
       </View>
 
       <View style={{ flex: 1, marginBottom: insets.bottom }}>
         {html ? (
           <WebView
+            key={ticket ?? 'visual'}
             source={{ html }}
             originWhitelist={['*']}
             mixedContentMode="always"
             javaScriptEnabled
             onMessage={onMessage}
+            keyboardDisplayRequiresUserAction={false}
             bounces={false}
             style={{ flex: 1, backgroundColor: theme.bg }}
           />
         ) : null}
         <View pointerEvents="box-none" style={{ position: 'absolute', top: 8, left: 0, right: 0 }}>
           {error ? (
-            <Notice lead={<PixelMark name="failed" cell={2} colors={{ '#': theme.statusBad }} />} text={error} />
+            <Notice lead={<PixelMark name="failed" cell={2} colors={{ '#': theme.statusBad }} />} text={error}>
+              <Button label={requesting ? 'Starting' : 'Retry'} kind="secondary" height={H.small} disabled={requesting} onPress={() => void requestShare()} />
+            </Notice>
           ) : !live ? (
-            <Notice lead={<WaitCells />} text="Starting Screen Sharing." />
+            <Notice lead={<WaitCells />} text="Connecting to Mac desktop." />
           ) : null}
         </View>
       </View>

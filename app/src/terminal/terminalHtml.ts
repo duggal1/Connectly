@@ -125,7 +125,7 @@ const TERMINAL_HTML_TEMPLATE = `<!doctype html>
     if (!touchMoved && Math.abs(fingerDelta) < 6) return;
     touchMoved = true;
     var dt = Math.max(1, nextTime - touchTime);
-    var scrollDelta = -fingerDelta;
+    var scrollDelta = fingerDelta;
     velocity = 0.72 * velocity + 0.28 * (scrollDelta / dt);
     touchY = nextY; touchTime = nextTime;
     moveLines(scrollDelta);

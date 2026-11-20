@@ -267,18 +267,13 @@ func (t *Tmux) create(name, cwd, command string, cols, rows int) (string, string
 		if attempt > 0 {
 			candidate = fmt.Sprintf("%s-%d", base, attempt+1)
 		}
-		_, err = t.run("new-session", "-d", "-s", candidate, "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows), "-c", cwd)
+		idOutput, err := t.run("new-session", "-d", "-P", "-F", "#{session_id}", "-s", candidate, "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows), "-c", cwd)
 		if err != nil {
 			lastErr = err
 			if !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
 				return "", "", err
 			}
 			continue
-		}
-		idOutput, err := t.run("display-message", "-p", "-t", "="+candidate, "#{session_id}")
-		if err != nil {
-			_, _ = t.run("kill-session", "-t", "="+candidate)
-			return "", "", err
 		}
 		id := strings.TrimSpace(idOutput)
 		if !validTmuxSessionID(id) {

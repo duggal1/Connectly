@@ -51,10 +51,11 @@ type RemoteSnapshot struct {
 }
 
 type observedSession struct {
-	activity int64
-	changed  time.Time
-	hash     uint64
-	preview  string
+	changed   time.Time
+	hash      uint64
+	preview   string
+	error     bool
+	hasOutput bool
 }
 
 type observedProcess struct {

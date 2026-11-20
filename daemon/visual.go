@@ -1,75 +1,36 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
-	"log/slog"
-	"net"
 	"net/http"
-	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-const (
-	vncAddr    = "127.0.0.1:5900"
-	ssPlist    = "/System/Library/LaunchDaemons/com.apple.screensharing.plist"
-	ticketLife = 30 * time.Second
-)
+const ticketLife = 30 * time.Second
 
-var vncUp = websocket.Upgrader{
-	ReadBufferSize:  32 << 10,
-	WriteBufferSize: 32 << 10,
-	Subprotocols:    []string{"binary"},
-	CheckOrigin:     func(*http.Request) bool { return true },
-}
+var visualUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
-// Visual is one global, temporary Screen Sharing session. It only unloads
-// Screen Sharing when Connectly enabled it; a service already running is left on.
 type Visual struct {
-	ttl time.Duration
-
+	ttl     time.Duration
 	mu      sync.Mutex
 	on      bool
-	owned   bool
 	until   time.Time
 	timer   *time.Timer
 	tickets map[string]time.Time
-	conns   map[net.Conn]struct{}
+	conns   map[*websocket.Conn]struct{}
 }
 
 func newVisual(ttl time.Duration) *Visual {
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
-	return &Visual{ttl: ttl, tickets: map[string]time.Time{}, conns: map[net.Conn]struct{}{}}
+	return &Visual{ttl: ttl, tickets: map[string]time.Time{}, conns: map[*websocket.Conn]struct{}{}}
 }
-
-func listening() bool {
-	conn, err := net.DialTimeout("tcp", vncAddr, 300*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
-}
-
-func screenSharing(verb string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	output, err := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "/bin/launchctl", verb, "-w", ssPlist).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("launchctl %s: %v: %s", verb, err, strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
 func randomTicket() (string, error) {
 	value := make([]byte, 16)
 	if _, err := rand.Read(value); err != nil {
@@ -77,68 +38,37 @@ func randomTicket() (string, error) {
 	}
 	return hex.EncodeToString(value), nil
 }
-
-// Start enables Screen Sharing if needed, rearms its auto-stop deadline, and
-// returns a single-use bridge ticket. Repeated starts extend the same session.
-func (v *Visual) Start() (ticket string, ttl time.Duration, err error) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	ticket, err = randomTicket()
+func (v *Visual) Start() (string, time.Duration, error) {
+	if err := visualPermission(); err != nil {
+		return "", 0, err
+	}
+	ticket, err := randomTicket()
 	if err != nil {
 		return "", 0, err
 	}
-	if !v.on {
-		if listening() {
-			v.owned = false
-		} else {
-			if err := screenSharing("load"); err != nil {
-				slog.Error("screen sharing on", "err", err)
-				if strings.Contains(err.Error(), "sudo: a password is required") {
-					return "", 0, errors.New("Screen Sharing needs administrator setup. On the Mac, run ./daemon/install.sh --permissions-only")
-				}
-				return "", 0, fmt.Errorf("Screen Sharing couldn't be turned on: %w", err)
-			}
-			for attempt := 0; attempt < 15 && !listening(); attempt++ {
-				time.Sleep(200 * time.Millisecond)
-			}
-			if !listening() {
-				_ = screenSharing("unload")
-				return "", 0, errors.New("Screen Sharing didn't start listening")
-			}
-			v.owned = true
-		}
-		v.on = true
-	}
-
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	now := time.Now()
-	for existing, expiry := range v.tickets {
+	for key, expiry := range v.tickets {
 		if !now.Before(expiry) {
-			delete(v.tickets, existing)
+			delete(v.tickets, key)
 		}
 	}
+	v.on = true
 	v.until = now.Add(v.ttl)
 	if v.timer != nil {
 		v.timer.Stop()
 	}
 	v.timer = time.AfterFunc(v.ttl, v.expire)
 	v.tickets[ticket] = now.Add(ticketLife)
-	slog.Info("visual on", "until", v.until.Format(time.RFC3339), "owned", v.owned)
 	return ticket, v.ttl, nil
 }
-
-func (v *Visual) Stop() {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.stopLocked()
-}
-
+func (v *Visual) Stop() { v.mu.Lock(); defer v.mu.Unlock(); v.stopLocked() }
 func (v *Visual) Shutdown() {
 	if v != nil {
 		v.Stop()
 	}
 }
-
 func (v *Visual) expire() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -146,11 +76,7 @@ func (v *Visual) expire() {
 		v.stopLocked()
 	}
 }
-
 func (v *Visual) stopLocked() {
-	if !v.on {
-		return
-	}
 	v.on = false
 	if v.timer != nil {
 		v.timer.Stop()
@@ -159,18 +85,10 @@ func (v *Visual) stopLocked() {
 	for conn := range v.conns {
 		_ = conn.Close()
 	}
-	v.conns = map[net.Conn]struct{}{}
+	v.conns = map[*websocket.Conn]struct{}{}
 	v.tickets = map[string]time.Time{}
-	if v.owned {
-		if err := screenSharing("unload"); err != nil {
-			slog.Warn("Screen Sharing may still be on. Run: sudo launchctl unload -w "+ssPlist, "err", err)
-		}
-	}
-	v.owned = false
-	slog.Info("visual off")
 }
-
-func (v *Visual) Status() (active bool, remaining time.Duration) {
+func (v *Visual) Status() (bool, time.Duration) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if !v.on {
@@ -178,7 +96,6 @@ func (v *Visual) Status() (active bool, remaining time.Duration) {
 	}
 	return true, time.Until(v.until)
 }
-
 func (v *Visual) redeem(ticket string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -187,20 +104,14 @@ func (v *Visual) redeem(ticket string) bool {
 	return ok && v.on && time.Now().Before(expires)
 }
 
-func (v *Visual) track(conn net.Conn) bool {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if !v.on {
-		return false
-	}
-	v.conns[conn] = struct{}{}
-	return true
-}
-
-func (v *Visual) untrack(conn net.Conn) {
-	v.mu.Lock()
-	delete(v.conns, conn)
-	v.mu.Unlock()
+type visualInput struct {
+	Type   string  `json:"type"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Down   bool    `json:"down"`
+	DeltaY float64 `json:"deltaY"`
+	Text   string  `json:"text"`
+	Key    string  `json:"key"`
 }
 
 func (v *Visual) bridge(w http.ResponseWriter, r *http.Request) {
@@ -208,53 +119,93 @@ func (v *Visual) bridge(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	ws, err := vncUp.Upgrade(w, r, nil)
+	ws, err := visualUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
-	tcp, err := net.DialTimeout("tcp", vncAddr, 2*time.Second)
-	if err != nil {
+	v.mu.Lock()
+	if !v.on {
+		v.mu.Unlock()
 		_ = ws.Close()
 		return
 	}
-	if !v.track(tcp) {
-		_ = tcp.Close()
-		_ = ws.Close()
-		return
-	}
-	defer v.untrack(tcp)
-	ws.SetReadLimit(16 << 20)
-
-	done := make(chan struct{}, 2)
+	v.conns[ws] = struct{}{}
+	v.mu.Unlock()
+	defer func() { v.mu.Lock(); delete(v.conns, ws); v.mu.Unlock(); _ = ws.Close() }()
+	ws.SetReadLimit(4096)
+	done := make(chan error, 1)
 	go func() {
-		buffer := make([]byte, 32<<10)
+		pressed := false
+		lastX, lastY := 0.0, 0.0
+		defer func() {
+			if pressed {
+				visualPointer(lastX, lastY, 2)
+			}
+		}()
 		for {
-			n, readErr := tcp.Read(buffer)
-			if n > 0 {
-				_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if ws.WriteMessage(websocket.BinaryMessage, buffer[:n]) != nil {
-					break
+			var input visualInput
+			if err := ws.ReadJSON(&input); err != nil {
+				done <- err
+				return
+			}
+			if (input.Type == "mouse" || input.Type == "move") && input.X >= 0 && input.X <= 1 && input.Y >= 0 && input.Y <= 1 {
+				kind := 0
+				switch input.Type {
+				case "mouse":
+					kind = 2
+					if input.Down {
+						kind = 1
+					}
+				case "move":
+					if input.Down {
+						kind = 3
+					}
+				}
+				if !visualPointer(input.X, input.Y, kind) {
+					done <- errors.New("Allow Accessibility access for termd in macOS System Settings to control the screen.")
+					return
+				}
+				lastX, lastY = input.X, input.Y
+				if input.Type == "mouse" {
+					pressed = input.Down
 				}
 			}
-			if readErr != nil {
-				break
+			if input.Type == "scroll" {
+				if input.DeltaY < -2400 {
+					input.DeltaY = -2400
+				} else if input.DeltaY > 2400 {
+					input.DeltaY = 2400
+				}
+				if !visualScroll(input.DeltaY) {
+					done <- errors.New("Allow Accessibility access for termd in macOS System Settings to control the screen.")
+					return
+				}
+			}
+			if input.Type == "key" && len(input.Text) <= 1024 && len(input.Key) <= 32 && !visualType(input.Text, input.Key) {
+				done <- errors.New("Allow Accessibility access for termd in macOS System Settings to control the screen.")
+				return
 			}
 		}
-		done <- struct{}{}
 	}()
-	go func() {
-		for {
-			_, message, readErr := ws.ReadMessage()
-			if readErr != nil {
-				break
-			}
-			if _, writeErr := tcp.Write(message); writeErr != nil {
-				break
-			}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		frame, err := visualFrame()
+		if err != nil {
+			_ = ws.WriteJSON(map[string]string{"error": err.Error()})
+			return
 		}
-		done <- struct{}{}
-	}()
-	<-done
-	_ = tcp.Close()
-	_ = ws.Close()
+		_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if err = ws.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+			return
+		}
+		select {
+		case err = <-done:
+			if err != nil && !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				_ = ws.WriteJSON(map[string]string{"error": err.Error()})
+			}
+			return
+		case <-ticker.C:
+		}
+	}
 }

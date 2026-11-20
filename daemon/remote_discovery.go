@@ -41,7 +41,6 @@ func (r *Remote) refresh() error {
 		remote   RemoteSessionInfo
 		primary  *tmuxPane
 		pids     []int
-		activity int64
 		attached int
 	}
 	groups := make(map[string]*group)
@@ -60,9 +59,6 @@ func (r *Remote) refresh() error {
 		g.remote.Panes++
 		g.pids = append(g.pids, pane.PID)
 		g.attached = pane.Attached
-		if pane.Activity > g.activity {
-			g.activity = pane.Activity
-		}
 		if g.primary == nil || (pane.WindowOn && pane.PaneOn) {
 			g.primary = pane
 		}
@@ -95,34 +91,39 @@ func (r *Remote) refresh() error {
 		}
 		command := strings.TrimPrefix(pane.Command, "-")
 		isShell := agent == "" && shellNames[command]
-		observed := r.sessionObservation(id, g.activity, now)
+		observed := r.sessionObservation(id)
 		if (!isShell || observed.preview == "") && captures < 24 {
 			captures++
 			if captured, captureErr := r.tmux.capture(id); captureErr == nil {
 				hash := fnv.New64a()
 				_, _ = hash.Write([]byte(captured))
 				sum := hash.Sum64()
-				if observed.hash != 0 && sum != observed.hash && !isShell {
+				if observed.hash != 0 && sum != observed.hash {
 					observed.changed = now
+					observed.hasOutput = true
 				}
 				observed.hash = sum
 				observed.preview = lastUsefulLine(captured)
+				observed.error = hasAgentError(captured)
+				if observed.error {
+					observed.changed = now
+					observed.hasOutput = true
+				}
 			}
 		}
-		state := "shell"
-		if !isShell {
-			if now.Sub(observed.changed) < 4*time.Second {
-				state = "running"
-				anyRunning = true
-			} else {
-				state = "idle"
-			}
+		state := classifyRemoteSession(isShell, observed, now)
+		if state == "running" {
+			anyRunning = true
 		}
 		phoneCount := phones[id]
 		phoneTotal += phoneCount
 		g.remote.Phones = phoneCount
 		g.remote.MacClients = max(0, g.attached-phoneCount)
-		g.remote.LastActive = observed.changed.UnixMilli()
+		if observed.hasOutput {
+			g.remote.LastActive = observed.changed.UnixMilli()
+		} else {
+			g.remote.LastActive = 0
+		}
 		g.remote.Cols, g.remote.Rows = pane.Cols, pane.Rows
 		g.remote.Command, g.remote.Agent = command, agent
 		g.remote.State, g.remote.Title, g.remote.Cwd = state, pane.Title, pane.Path
@@ -162,6 +163,21 @@ func (r *Remote) refresh() error {
 	return nil
 }
 
+func classifyRemoteSession(shell bool, observed *observedSession, now time.Time) string {
+	if shell {
+		return "shell"
+	}
+	if observed.error {
+		return "error"
+	}
+	if observed.hasOutput {
+		if elapsed := now.Sub(observed.changed); elapsed >= 0 && elapsed < 4*time.Second {
+			return "running"
+		}
+	}
+	return "idle"
+}
+
 func (r *Remote) phoneCounts() map[string]int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -172,16 +188,13 @@ func (r *Remote) phoneCounts() map[string]int {
 	return copy
 }
 
-func (r *Remote) sessionObservation(id string, activity int64, now time.Time) *observedSession {
+func (r *Remote) sessionObservation(id string) *observedSession {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	state := r.seen[id]
 	if state == nil {
-		state = &observedSession{activity: activity, changed: time.Unix(activity, 0)}
+		state = &observedSession{}
 		r.seen[id] = state
-	} else if state.activity != activity {
-		state.activity = activity
-		state.changed = now
 	}
 	return state
 }
@@ -207,11 +220,7 @@ func (r *Remote) looseAgents(procs map[int]*processInfo, managed map[int]bool) [
 			meta = observedProcess{startedAt: process.startedAt, command: process.args, cwd: currentDirectory(pid)}
 			r.meta[pid] = meta
 		}
-		state := "idle"
-		if process.cpu >= 2 {
-			state = "running"
-		}
-		loose = append(loose, LooseAgent{PID: pid, Agent: agent, TTY: process.tty, Cwd: meta.cwd, StartedAt: process.startedAt, State: state})
+		loose = append(loose, LooseAgent{PID: pid, Agent: agent, TTY: process.tty, Cwd: meta.cwd, StartedAt: process.startedAt, State: "unknown"})
 	}
 	for pid := range r.meta {
 		if !seen[pid] {
