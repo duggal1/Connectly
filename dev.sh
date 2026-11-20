@@ -45,13 +45,23 @@ if [[ -z "$TAILSCALE_IP" ]]; then
 fi
 LISTEN_ADDR="$TAILSCALE_IP:7681"
 
+# The Tailscale address can take longer than a second to answer under load, so
+# allow a few seconds and compare the body directly. A `curl | grep -q` pipeline
+# is flaky here: grep's early exit can SIGPIPE curl, which `pipefail` reports as
+# a failed check even when termd answered "ok".
+health_ok() {
+  local body
+  body="$(curl --silent --max-time 3 -H 'X-Request-ID: dev-startup' "http://$LISTEN_ADDR/healthz" 2>/dev/null)" || return 1
+  [[ "$body" == "ok" ]]
+}
+
 if lsof -nP -iTCP:8081 -sTCP:LISTEN >/dev/null 2>&1; then
   METRO_PIDS="$(lsof -nP -tiTCP:8081 -sTCP:LISTEN | paste -sd ',' -)"
   echo "Metro is already using port 8081 (PID $METRO_PIDS). Stop that Expo process before running bun dev." >&2
   exit 1
 fi
 
-if ! curl --silent --show-error --max-time 1 "http://$LISTEN_ADDR/healthz" 2>/dev/null | grep -qx 'ok'; then
+if ! health_ok; then
   if lsof -nP -iTCP:7681 -sTCP:LISTEN >/dev/null 2>&1; then
     DAEMON_PIDS="$(lsof -nP -tiTCP:7681 -sTCP:LISTEN | paste -sd ',' -)"
     echo "Port 7681 is already in use (PID $DAEMON_PIDS), but termd did not answer at $LISTEN_ADDR. Stop that listener before running bun dev." >&2
@@ -62,17 +72,17 @@ if ! curl --silent --show-error --max-time 1 "http://$LISTEN_ADDR/healthz" 2>/de
   env -u LUMEN_TOKEN "$DAEMON_BIN" --token-file "$TOKEN_FILE" --listen "$LISTEN_ADDR" &
   DAEMON_PID=$!
   DAEMON_READY=0
-  for _ in {1..50}; do
+  for _ in {1..30}; do
     if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
       wait "$DAEMON_PID" || true
       echo "termd exited before becoming ready on $LISTEN_ADDR." >&2
       exit 1
     fi
-    if curl --silent --max-time 1 -H 'X-Request-ID: dev-startup' "http://$LISTEN_ADDR/healthz" 2>/dev/null | grep -qx 'ok'; then
+    if health_ok; then
       DAEMON_READY=1
       break
     fi
-    sleep 0.1
+    sleep 0.2
   done
   if [[ "$DAEMON_READY" != "1" ]]; then
     echo "termd did not become ready on $LISTEN_ADDR." >&2
